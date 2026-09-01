@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+python3 -c "
+import os
+import subprocess
+import json
+from datetime import datetime
+
+search_dirs = [
+    os.path.expanduser('~/.gemini/antigravity/scratch'),
+    os.path.expanduser('~/Projects'),
+    os.path.expanduser('~/.config/omarchy')
+]
+
+today_commits = 0
+dirty_repos = 0
+total_repos = 0
+today_str = datetime.now().strftime('%Y-%m-%d')
+
+for base in search_dirs:
+    if not os.path.exists(base):
+        continue
+    for root, dirs, files in os.walk(base):
+        if '.git' in dirs:
+            dirs.remove('.git')
+            total_repos += 1
+            repo_path = root
+
+            try:
+                st = subprocess.check_output(['git', '-C', repo_path, 'status', '--porcelain'], text=True, timeout=1).strip()
+                if st:
+                    dirty_repos += 1
+            except:
+                pass
+
+            try:
+                lg = subprocess.check_output(['git', '-C', repo_path, 'log', '--since=midnight', '--oneline'], text=True, timeout=1).strip()
+                if lg:
+                    today_commits += len([l for l in lg.split('\n') if l.strip()])
+            except:
+                pass
+
+dirty_icon = ' 󰅚' if dirty_repos > 0 else ' ✓'
+tooltip = f'⚡ Git Radar\n• Bugün Atılan Commit: {today_commits}\n• Değişiklik Olan Repo: {dirty_repos}\n• Toplam Repo: {total_repos}\n\n[Sol Tık] Çalışma Alanı Terminalini Aç'
+
+print(json.dumps({
+    'text': f' {today_commits}{dirty_icon}',
+    'tooltip': tooltip,
+    'class': 'active'
+}))
+"

@@ -6,7 +6,7 @@ import qs.Ui
 
 BarWidget {
   id: root
-  moduleName: "omarchy.git-radar"
+  moduleName: "ozdil.git-radar"
 
   property int todayCommits: 0
   property int dirtyRepos: 0

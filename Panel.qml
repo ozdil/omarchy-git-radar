@@ -1,133 +1,140 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
-import qs.Ui
 import qs.Commons
+import qs.Ui
 
 Panel {
   id: root
-  moduleName: "omarchy.git-radar"
+  moduleName: "ozdil.git-radar"
+  ipcTarget: "ozdil.git-radar"
 
-  property var reposData: []
-  property var heatmapData: []
   property int todayCommits: 0
-  property int weekCommits: 0
   property int dirtyRepos: 0
   property int totalRepos: 0
+  property int weekCommits: 0
   property string statusColor: "#00cbb8"
+  property var reposList: []
+  property var heatmapList: []
 
   Process {
-    id: refreshProc
+    id: scanProc
     command: ["bash", "-c", "$HOME/.config/omarchy/plugins/git-radar/git-scanner"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         try {
           var parsed = JSON.parse(text)
-          root.reposData = parsed.repos || []
-          root.heatmapData = parsed.heatmap || []
           root.todayCommits = parsed.today_commits || 0
-          root.weekCommits = parsed.week_commits || 0
           root.dirtyRepos = parsed.dirty_repos || 0
           root.totalRepos = parsed.total_repos || 0
+          root.weekCommits = parsed.week_commits || 0
           root.statusColor = parsed.status_color || "#00cbb8"
+          root.reposList = parsed.repos || []
+          root.heatmapList = parsed.heatmap || []
         } catch(e) {}
       }
     }
   }
 
+  Timer {
+    interval: 5000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: {
+      if (!scanProc.running) scanProc.running = true
+    }
+  }
+
   function refresh() {
-    if (!refreshProc.running) refreshProc.running = true
+    if (!scanProc.running) scanProc.running = true
   }
 
-  onOpenedChanged: {
-    if (opened) root.refresh()
+  BarIconButton {
+    id: button
+    anchors.fill: parent
+    bar: root.bar
+    text: " " + root.todayCommits + " " + (root.dirtyRepos > 0 ? "󰅚 " + root.dirtyRepos : "✓")
+    color: root.dirtyRepos > 0 ? "#f4a261" : "#00cbb8"
+    slotSize: Style.bar.statusSlot
+    tooltipText: "Git Radar: " + root.todayCommits + " commits today • " + root.dirtyRepos + " repos with changes"
+
+    onPressed: function(b) {
+      if (b === Qt.RightButton) {
+        root.bar.run("xdg-terminal-exec --app-id=org.omarchy.terminal")
+      } else {
+        root.toggle()
+      }
+    }
   }
 
-  contentItem: Rectangle {
-    implicitWidth: 460
-    implicitHeight: 480
-    color: "#070a10"
-    radius: 12
-    border.color: root.statusColor
-    border.width: 1
+  KeyboardPanel {
+    id: panel
+    anchorItem: button
+    owner: root
+    width: 440
+    contentHeight: panel.fittedContentHeight(mainCol.implicitHeight)
 
-    ColumnLayout {
-      anchors.fill: parent
-      anchors.margins: 16
-      spacing: 12
+    Column {
+      id: mainCol
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      spacing: Style.space(12)
 
-      // Header Bar
+      // Header
       RowLayout {
-        Layout.fillWidth: true
-        spacing: 8
+        width: parent.width
 
         Text {
-          text: "⚡ GIT RADAR"
-          font.pixelSize: 15
+          text: "⚡ Git Radar"
+          font.family: root.bar ? root.bar.fontFamily : "sans-serif"
+          font.pixelSize: Style.font.title
           font.bold: true
-          color: "#e5ecf4"
+          color: root.bar ? root.bar.foreground : "#ffffff"
         }
 
         Item { Layout.fillWidth: true }
 
-        Rectangle {
-          radius: 12
-          color: root.dirtyRepos > 0 ? "#3b2311" : "#0d2b27"
-          border.color: root.dirtyRepos > 0 ? "#f4a261" : "#00cbb8"
-          border.width: 1
-          implicitWidth: statusText.implicitWidth + 16
-          implicitHeight: 24
-
-          Text {
-            id: statusText
-            anchors.centerIn: parent
-            text: (root.dirtyRepos > 0 ? (root.dirtyRepos + " bekleyen repo") : "Temiz / Senkron")
-            font.pixelSize: 11
-            font.bold: true
-            color: root.dirtyRepos > 0 ? "#f4a261" : "#00cbb8"
-          }
-        }
-
-        Button {
-          text: "🔄"
-          implicitWidth: 28
-          implicitHeight: 24
-          onClicked: root.refresh()
+        Text {
+          text: root.dirtyRepos > 0 ? (root.dirtyRepos + " Değişen Repo") : "Tüm Repolar Senkron"
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          color: root.statusColor
         }
       }
 
-      // 7-Day Activity Heatmap Card
+      // 7-day commit activity row
       Rectangle {
-        Layout.fillWidth: true
-        implicitHeight: 64
+        width: parent.width
+        implicitHeight: 52
         color: "#0f172a"
-        radius: 8
+        radius: Style.radius.panel
 
         ColumnLayout {
           anchors.fill: parent
-          anchors.margins: 8
+          anchors.margins: Style.space(6)
           spacing: 4
 
           RowLayout {
-            Text { text: "Haftalık Kodlama Nabzı (Son 7 Gün)"; font.pixelSize: 10; color: "#94a3b8" }
+            Text { text: "Son 7 Günlük Nabız"; font.pixelSize: Style.font.caption; color: "#94a3b8" }
             Item { Layout.fillWidth: true }
-            Text { text: root.weekCommits + " commit"; font.pixelSize: 10; font.bold: true; color: "#60a5fa" }
+            Text { text: root.weekCommits + " commit"; font.pixelSize: Style.font.caption; font.bold: true; color: "#60a5fa" }
           }
 
           RowLayout {
             Layout.alignment: Qt.AlignHCenter
-            spacing: 8
+            spacing: 6
 
             Repeater {
-              model: root.heatmapData
+              model: root.heatmapList
 
               Rectangle {
-                width: 24
-                height: 24
-                radius: 4
+                width: 18
+                height: 18
+                radius: 3
                 color: {
                   var v = modelData
                   if (v === 0) return "#1e293b"
@@ -140,7 +147,7 @@ Panel {
                 Text {
                   anchors.centerIn: parent
                   text: String(modelData)
-                  font.pixelSize: 9
+                  font.pixelSize: 8
                   color: modelData > 0 ? "#ffffff" : "#64748b"
                 }
               }
@@ -149,92 +156,25 @@ Panel {
         }
       }
 
-      Text {
-        text: "Yerel Git Depoları (" + root.totalRepos + " Repo)"
-        font.pixelSize: 12
-        font.bold: true
-        color: "#cbd5e1"
-      }
+      // Quick action
+      RowLayout {
+        width: parent.width
+        spacing: 8
 
-      // Repositories List
-      ScrollView {
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        clip: true
+        Button {
+          Layout.fillWidth: true
+          text: "🔄 Depoları Tara"
+          onClicked: root.refresh()
+        }
 
-        ListView {
-          model: root.reposData
-          spacing: 6
-
-          delegate: Rectangle {
-            width: ListView.view.width
-            implicitHeight: 44
-            color: !modelData.is_clean ? "#24180d" : "#0d1424"
-            radius: 6
-            border.color: !modelData.is_clean ? "#f4a261" : "#1e293b"
-            border.width: 1
-
-            RowLayout {
-              anchors.fill: parent
-              anchors.margins: 8
-              spacing: 8
-
-              Text {
-                text: !modelData.is_clean ? "📝" : "📦"
-                font.pixelSize: 14
-              }
-
-              ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 2
-
-                RowLayout {
-                  Text {
-                    text: modelData.name
-                    font.pixelSize: 12
-                    font.bold: true
-                    color: !modelData.is_clean ? "#f4a261" : "#60a5fa"
-                  }
-                  Text {
-                    text: "• " + modelData.branch
-                    font.pixelSize: 10
-                    color: "#64748b"
-                  }
-                  if (modelData.dirty_files > 0) {
-                    Text {
-                      text: "[" + modelData.dirty_files + " dosya değişti]"
-                      font.pixelSize: 10
-                      font.bold: true
-                      color: "#e76f51"
-                    }
-                  }
-                }
-
-                Text {
-                  text: modelData.path
-                  font.pixelSize: 10
-                  color: "#64748b"
-                  elide: Text.ElideMiddle
-                }
-              }
-
-              Button {
-                text: "💻 Terminal"
-                implicitHeight: 24
-                onClicked: {
-                  Quickshell.execDetached(["xdg-terminal-exec", "--app-id=org.omarchy.terminal", "bash", "-c", "cd '" + modelData.path + "'; exec bash"])
-                }
-              }
-            }
+        Button {
+          Layout.fillWidth: true
+          text: "💻 Terminal Aç"
+          onClicked: {
+            root.close()
+            if (root.bar) root.bar.run("xdg-terminal-exec --app-id=org.omarchy.terminal")
           }
         }
-      }
-
-      Text {
-        text: "Ozan Özdil (ozdil) • Git Radar v1.0.0"
-        font.pixelSize: 10
-        color: "#64748b"
-        Layout.alignment: Qt.AlignHCenter
       }
     }
   }
