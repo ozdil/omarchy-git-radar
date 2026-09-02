@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+DIR="$(cd "$(dirname "$(realpath "$0")")" >/dev/null 2>&1 && pwd)"
+clear
+echo -e "\033[1;36m=================================================================\033[0m"
+echo -e "\033[1;33m  ⚡ GIT RADAR • Yerel Depo Nabzı ve Commit Isı Haritası \033[0m"
+echo -e "\033[1;36m=================================================================\033[0m"
+echo ""
+
+DATA=$("$DIR/git-scanner" 2>/dev/null || echo '{"status":"UNKNOWN"}')
+
+python3 -c "
+import json, sys
+
+try:
+    d = json.loads('''$DATA''')
+    repos = d.get('repositories', [])
+    commits = d.get('today_commits', 0)
+    dirty = d.get('dirty_repos_count', 0)
+
+    print(f'📊 Bugün Yapılan Toplam Commit: {commits} | Kaydedilmemiş Değişiklik: {dirty}\n')
+    print(f'{\"DEPO ADI\":<24} {\"BUGÜNKÜ COMMIT\":<18} {\"DURUM\":<16}')
+    print('-' * 60)
+
+    for r in repos:
+        name = str(r.get('name', ''))[:22]
+        c = str(r.get('today_commits', 0))
+        status = '⚠️ Değişiklik Var' if r.get('is_dirty') else '✓ Temiz'
+        print(f'{name:<24} {c:<18} {status:<16}')
+except Exception as e:
+    print(f'Hata: {e}')
+"
+
+echo ""
+echo -e "\033[0;90mKapatmak için bir tuşa basın...\033[0m"
+read -n 1 -s -r

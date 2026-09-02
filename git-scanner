@@ -1,114 +1,106 @@
-#!/usr/bin/env bash
-# ==============================================================================
-# Git Radar Workspace Scanner
-# Scans local git repos for status, uncommitted files, and commit heatmap
-# ==============================================================================
-
-python3 -c "
+#!/usr/bin/env python3
 import os
 import subprocess
 import json
-from datetime import datetime, timedelta
+import time
 
-search_dirs = [
-    os.path.expanduser('~/.gemini/antigravity/scratch'),
-    os.path.expanduser('~/Projects'),
-    os.path.expanduser('~/Workspace'),
-    os.path.expanduser('~/.config/omarchy')
-]
+MAX_REPOS = 20
+MAX_DEPTH = 3
+SCAN_TIMEOUT = 2.5
 
-found_repos = []
-today_str = datetime.now().strftime('%Y-%m-%d')
-week_counts = [0] * 7 # Last 7 days
+def get_git_repos():
+    home = os.path.expanduser("~")
+    search_roots = [
+        os.path.join(home, "Projects"),
+        os.path.join(home, "src"),
+        os.path.join(home, ".gemini", "antigravity", "scratch"),
+        os.path.join(home, ".config", "omarchy", "plugins"),
+    ]
+    
+    repos = []
+    start_time = time.time()
 
-for base in search_dirs:
-    if not os.path.exists(base):
-        continue
-    for root, dirs, files in os.walk(base):
-        if '.git' in dirs:
-            dirs.remove('.git') # don't recurse into .git
-            repo_path = root
-            repo_name = os.path.basename(repo_path)
+    for root in search_roots:
+        if not os.path.exists(root):
+            continue
+        for dirpath, dirnames, _ in os.walk(root):
+            # Enforce hard time and count budgets
+            if time.time() - start_time > SCAN_TIMEOUT or len(repos) >= MAX_REPOS:
+                break
+            # Skip hidden / deep folders
+            depth = len(os.path.relpath(dirpath, root).split(os.sep))
+            if depth > MAX_DEPTH:
+                dirnames.clear()
+                continue
+            if ".git" in dirnames:
+                repos.append(dirpath)
+                dirnames.remove(".git") # Don't descend into .git
+                if len(repos) >= MAX_REPOS:
+                    break
+    return repos
 
-            # Get current branch
-            try:
-                branch = subprocess.check_output(['git', '-C', repo_path, 'branch', '--show-current'], text=True, timeout=1).strip()
-            except:
-                branch = 'detached'
+def inspect_repo(repo_path):
+    try:
+        # Check uncommitted changes (bounded timeout)
+        res_status = subprocess.run(
+            ["git", "-C", repo_path, "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=0.5,
+            check=False
+        )
+        is_dirty = bool(res_status.stdout.strip())
 
-            # Check dirty status (uncommitted / modified files)
-            try:
-                status_out = subprocess.check_output(['git', '-C', repo_path, 'status', '--porcelain'], text=True, timeout=1).strip()
-                dirty_count = len([l for l in status_out.split('\n') if l.strip()])
-            except:
-                dirty_count = 0
+        # Count today's commits by author
+        res_log = subprocess.run(
+            ["git", "-C", repo_path, "log", "--since=midnight", "--oneline"],
+            capture_output=True,
+            text=True,
+            timeout=0.5,
+            check=False
+        )
+        today_commits = len(res_log.stdout.strip().splitlines()) if res_log.stdout.strip() else 0
 
-            # Check unpushed commits
-            try:
-                unpushed_out = subprocess.check_output(['git', '-C', repo_path, 'log', '@{u}..HEAD', '--oneline'], text=True, timeout=1).strip()
-                unpushed_count = len([l for l in unpushed_out.split('\n') if l.strip()])
-            except:
-                unpushed_count = 0
+        return {
+            "name": os.path.basename(repo_path)[:30],
+            "path": repo_path[:80],
+            "is_dirty": is_dirty,
+            "today_commits": today_commits
+        }
+    except Exception:
+        return None
 
-            # Get commit stats for the last 7 days
-            try:
-                log_dates = subprocess.check_output(
-                    ['git', '-C', repo_path, 'log', '--since=7 days ago', '--format=%cd', '--date=short'],
-                    text=True, timeout=1
-                ).strip().split('\n')
-                for d in log_dates:
-                    d = d.strip()
-                    if d:
-                        for day_idx in range(7):
-                            target_d = (datetime.now() - timedelta(days=6 - day_idx)).strftime('%Y-%m-%d')
-                            if d == target_d:
-                                week_counts[day_idx] += 1
-            except:
-                pass
+def main():
+    try:
+        repos = get_git_repos()
+        repo_data = []
+        total_commits_today = 0
+        dirty_repos_count = 0
 
-            found_repos.append({
-                'name': repo_name,
-                'path': repo_path,
-                'branch': branch,
-                'dirty_files': dirty_count,
-                'unpushed_commits': unpushed_count,
-                'is_clean': dirty_count == 0 and unpushed_count == 0
-            })
+        for r in repos:
+            info = inspect_repo(r)
+            if info:
+                repo_data.append(info)
+                total_commits_today += info["today_commits"]
+                if info["is_dirty"]:
+                    dirty_repos_count += 1
 
-# Sort repos: dirty/unpushed first, then by name
-found_repos.sort(key=lambda r: (r['is_clean'], r['name']))
+        print(json.dumps({
+            "status": "OK",
+            "total_repos_scanned": len(repo_data),
+            "today_commits": total_commits_today,
+            "dirty_repos_count": dirty_repos_count,
+            "repositories": repo_data[:15]
+        }))
+    except Exception as e:
+        print(json.dumps({
+            "status": "UNKNOWN",
+            "error": str(e)[:60],
+            "total_repos_scanned": 0,
+            "today_commits": 0,
+            "dirty_repos_count": 0,
+            "repositories": []
+        }))
 
-total_dirty = sum(1 for r in found_repos if r['dirty_files'] > 0)
-total_unpushed = sum(1 for r in found_repos if r['unpushed_commits'] > 0)
-today_commits = week_counts[-1]
-
-# Visual Heatmap (blocks)
-heatmap_chars = ['·', '░', '▒', '▓', '█']
-heatmap_visual = []
-for c in week_counts:
-    if c == 0:
-        heatmap_visual.append('·')
-    elif c <= 2:
-        heatmap_visual.append('░')
-    elif c <= 5:
-        heatmap_visual.append('▒')
-    elif c <= 10:
-        heatmap_visual.append('▓')
-    else:
-        heatmap_visual.append('█')
-
-output = {
-    'total_repos': len(found_repos),
-    'dirty_repos': total_dirty,
-    'unpushed_repos': total_unpushed,
-    'today_commits': today_commits,
-    'week_commits': sum(week_counts),
-    'heatmap': week_counts,
-    'heatmap_str': ''.join(heatmap_visual),
-    'status': 'DIRTY' if total_dirty > 0 else 'CLEAN',
-    'status_color': '#f4a261' if total_dirty > 0 else '#00cbb8',
-    'repos': found_repos[:20]
-}
-
-print(json.dumps(output, indent=2))
-"
+if __name__ == "__main__":
+    main()

@@ -1,50 +1,29 @@
 #!/usr/bin/env bash
+set -eo pipefail
+DIR="$(cd "$(dirname "$(realpath "$0")")" >/dev/null 2>&1 && pwd)"
+SCAN_OUT="$("$DIR/git-scanner" 2>/dev/null || echo '{"status":"UNKNOWN"}')"
+
 python3 -c "
-import os
-import subprocess
-import json
-from datetime import datetime
+import json, sys
 
-search_dirs = [
-    os.path.expanduser('~/.gemini/antigravity/scratch'),
-    os.path.expanduser('~/Projects'),
-    os.path.expanduser('~/.config/omarchy')
-]
+try:
+    d = json.loads('''$SCAN_OUT''')
+    status = d.get('status', 'UNKNOWN')
+    commits = d.get('today_commits', 0)
+    dirty = d.get('dirty_repos_count', 0)
+    total = d.get('total_repos_scanned', 0)
 
-today_commits = 0
-dirty_repos = 0
-total_repos = 0
-today_str = datetime.now().strftime('%Y-%m-%d')
+    if status == 'OK':
+        icon = '󰊢'
+        dirty_str = f' (󱇬 {dirty})' if dirty > 0 else ''
+        text = f'{icon} {commits} commit{dirty_str}'
+        css = 'alert' if dirty > 0 else 'normal'
+    else:
+        text = '󰊢 Git: Bilinmiyor'
+        css = 'alert'
 
-for base in search_dirs:
-    if not os.path.exists(base):
-        continue
-    for root, dirs, files in os.walk(base):
-        if '.git' in dirs:
-            dirs.remove('.git')
-            total_repos += 1
-            repo_path = root
-
-            try:
-                st = subprocess.check_output(['git', '-C', repo_path, 'status', '--porcelain'], text=True, timeout=1).strip()
-                if st:
-                    dirty_repos += 1
-            except:
-                pass
-
-            try:
-                lg = subprocess.check_output(['git', '-C', repo_path, 'log', '--since=midnight', '--oneline'], text=True, timeout=1).strip()
-                if lg:
-                    today_commits += len([l for l in lg.split('\n') if l.strip()])
-            except:
-                pass
-
-dirty_icon = ' 󰅚' if dirty_repos > 0 else ' ✓'
-tooltip = f'⚡ Git Radar\n• Bugün Atılan Commit: {today_commits}\n• Değişiklik Olan Repo: {dirty_repos}\n• Toplam Repo: {total_repos}\n\n[Sol Tık] Çalışma Alanı Terminalini Aç'
-
-print(json.dumps({
-    'text': f' {today_commits}{dirty_icon}',
-    'tooltip': tooltip,
-    'class': 'active'
-}))
+    tooltip = f'⚡ Git Radar\n• Bugün Yapılan Commit: {commits}\n• Değişiklik Olan Depolar: {dirty}\n• Taranan Depolar: {total}\n\n[Sol Tık] Git Panelini Aç'
+    print(json.dumps({'text': text, 'tooltip': tooltip, 'class': css}))
+except Exception:
+    print(json.dumps({'text': '󰊢 Git: Hata', 'tooltip': 'Git verisi alınamadı', 'class': 'alert'}))
 "

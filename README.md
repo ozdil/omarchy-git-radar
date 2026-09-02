@@ -1,6 +1,6 @@
-# ⚡ Omarchy Git Radar Plugin
+# ⚡ Git Radar • Omarchy Developer Commit & Multi-Repo Watchdog
 
-> **Developer pulse, live commit activity heatmap, and multi-repo change tracker for Omarchy 4.0.2+.**
+> **Developer commit tracker and workspace watchdog plugin for Omarchy 4.0.2+.**
 
 Author: **Ozan Özdil (ozdil)**  
 License: **MIT**
@@ -9,19 +9,41 @@ License: **MIT**
 
 ## ✨ Features
 
-- 📊 **Live 7-Day Commit Heatmap:** Interactive GitHub-style visual commit activity matrix directly in the status bar panel.
-- 📝 **Multi-Repository Watchdog:** Scans local project workspaces for uncommitted modifications (`dirty files`) and unpushed commits.
-- 💻 **One-Click Terminal Launch:** Open your preferred terminal directly inside any repository from the panel.
-- ⚡ **Lightweight & Fast:** Scans repos in <0.05s with structured caching.
+- 📊 **Commit Tracker:** Scans bounded local workspace repositories and aggregates today's commit activity.
+- ⚠️ **Dirty State Detection:** Instantly notifies uncommitted work across monitored git projects.
+- ⏱️ **Resource-Constrained:** Strict timeout budgets (max 2.5s) and bounded recursion depth (max 3 levels).
+- 🛡️ **Zero Hardcoded Paths:** Dynamically resolves plugin-relative helpers.
 
 ---
 
-## 🚀 Installation
+## 📋 Requirements
 
+- `git`
+- `python3` (>= 3.10)
+
+---
+
+## 🚀 Installation & Removal
+
+### Installation
 ```bash
-# Clone to Omarchy plugins directory
 git clone https://github.com/ozdil/omarchy-git-radar.git ~/.config/omarchy/plugins/git-radar
-chmod +x ~/.config/omarchy/plugins/git-radar/git-scanner
+chmod +x ~/.config/omarchy/plugins/git-radar/git-*
 ```
 
-Add `{"id": "omarchy.git-radar"}` to your `~/.config/omarchy/shell.json` under `bar.layout.right`.
+Add to `~/.config/omarchy/shell.json`:
+```json
+{
+  "id": "git-radar",
+  "exec": "$HOME/.config/omarchy/plugins/git-radar/git-status",
+  "interval": 10,
+  "onClick": "omarchy-launch-floating-terminal-with-presentation $HOME/.config/omarchy/plugins/git-radar/git-dashboard"
+}
+```
+
+### Removal
+```bash
+rm -rf ~/.config/omarchy/plugins/git-radar
+# Remove the "git-radar" entry from ~/.config/omarchy/shell.json and run:
+omarchy-restart-shell
+```
