@@ -1,35 +1,43 @@
-#!/usr/bin/env bash
-DIR="$(cd "$(dirname "$(realpath "$0")")" >/dev/null 2>&1 && pwd)"
-clear
-echo -e "\033[1;36m=================================================================\033[0m"
-echo -e "\033[1;33m  ⚡ GIT RADAR • Yerel Depo Nabzı ve Commit Isı Haritası \033[0m"
-echo -e "\033[1;36m=================================================================\033[0m"
-echo ""
+#!/usr/bin/env python3
+import json
+import subprocess
+import os
+import sys
 
-DATA=$("$DIR/git-scanner" 2>/dev/null || echo '{"status":"UNKNOWN"}')
+def main():
+    plugin_dir = os.path.dirname(os.path.realpath(__file__))
+    scanner_path = os.path.join(plugin_dir, "git-scanner")
 
-python3 -c "
-import json, sys
+    os.system("clear")
+    print("\033[1;36m=================================================================\033[0m")
+    print("\033[1;33m  ⚡ GIT RADAR • Yerel Depo Nabzı ve Commit Isı Haritası \033[0m")
+    print("\033[1;36m=================================================================\033[0m\n")
 
-try:
-    d = json.loads('''$DATA''')
-    repos = d.get('repositories', [])
-    commits = d.get('today_commits', 0)
-    dirty = d.get('dirty_repos_count', 0)
+    try:
+        res = subprocess.run([scanner_path], capture_output=True, text=True, timeout=2.5)
+        data = json.loads(res.stdout) if res.returncode == 0 else {}
+    except Exception as e:
+        data = {"status": "UNKNOWN", "error": str(e)}
 
-    print(f'📊 Bugün Yapılan Toplam Commit: {commits} | Kaydedilmemiş Değişiklik: {dirty}\n')
-    print(f'{\"DEPO ADI\":<24} {\"BUGÜNKÜ COMMIT\":<18} {\"DURUM\":<16}')
-    print('-' * 60)
+    repos = data.get("repositories", [])
+    commits = data.get("today_commits", 0)
+    dirty = data.get("dirty_repos_count", 0)
+
+    print(f"📊 Bugün Yapılan Toplam Commit: {commits} | Kaydedilmemiş Değişiklik: {dirty}\n")
+    print(f"{'DEPO ADI':<24} {'BUGÜNKÜ COMMIT':<18} {'DURUM':<16}")
+    print("-" * 60)
 
     for r in repos:
-        name = str(r.get('name', ''))[:22]
-        c = str(r.get('today_commits', 0))
-        status = '⚠️ Değişiklik Var' if r.get('is_dirty') else '✓ Temiz'
-        print(f'{name:<24} {c:<18} {status:<16}')
-except Exception as e:
-    print(f'Hata: {e}')
-"
+        name = str(r.get("name", ""))[:22]
+        c = str(r.get("today_commits", 0))
+        status = "⚠️ Değişiklik Var" if r.get("is_dirty") else "✓ Temiz"
+        print(f"{name:<24} {c:<18} {status:<16}")
 
-echo ""
-echo -e "\033[0;90mKapatmak için bir tuşa basın...\033[0m"
-read -n 1 -s -r
+    print("\n\033[0;90mKapatmak için Enter'a basın...\033[0m")
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+if __name__ == "__main__":
+    main()

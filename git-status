@@ -1,29 +1,34 @@
-#!/usr/bin/env bash
-set -eo pipefail
-DIR="$(cd "$(dirname "$(realpath "$0")")" >/dev/null 2>&1 && pwd)"
-SCAN_OUT="$("$DIR/git-scanner" 2>/dev/null || echo '{"status":"UNKNOWN"}')"
+#!/usr/bin/env python3
+import subprocess
+import json
+import os
+import sys
 
-python3 -c "
-import json, sys
+def main():
+    plugin_dir = os.path.dirname(os.path.realpath(__file__))
+    scanner_path = os.path.join(plugin_dir, "git-scanner")
 
-try:
-    d = json.loads('''$SCAN_OUT''')
-    status = d.get('status', 'UNKNOWN')
-    commits = d.get('today_commits', 0)
-    dirty = d.get('dirty_repos_count', 0)
-    total = d.get('total_repos_scanned', 0)
+    try:
+        res = subprocess.run([scanner_path], capture_output=True, text=True, timeout=2.5)
+        data = json.loads(res.stdout) if res.returncode == 0 else {}
+    except Exception:
+        data = {}
 
-    if status == 'OK':
-        icon = '󰊢'
-        dirty_str = f' (󱇬 {dirty})' if dirty > 0 else ''
-        text = f'{icon} {commits} commit{dirty_str}'
-        css = 'alert' if dirty > 0 else 'normal'
+    status = data.get("status", "UNKNOWN")
+    commits = data.get("today_commits", 0)
+    dirty = data.get("dirty_repos_count", 0)
+    total = data.get("total_repos_scanned", 0)
+
+    if status == "OK":
+        dirty_str = f" (󱇬 {dirty})" if dirty > 0 else ""
+        text = f"󰊢 {commits} commit{dirty_str}"
+        css = "alert" if dirty > 0 else "normal"
     else:
-        text = '󰊢 Git: Bilinmiyor'
-        css = 'alert'
+        text = "󰊢 Git: Bilinmiyor"
+        css = "alert"
 
-    tooltip = f'⚡ Git Radar\n• Bugün Yapılan Commit: {commits}\n• Değişiklik Olan Depolar: {dirty}\n• Taranan Depolar: {total}\n\n[Sol Tık] Git Panelini Aç'
-    print(json.dumps({'text': text, 'tooltip': tooltip, 'class': css}))
-except Exception:
-    print(json.dumps({'text': '󰊢 Git: Hata', 'tooltip': 'Git verisi alınamadı', 'class': 'alert'}))
-"
+    tooltip = f"⚡ Git Radar\n• Bugün Yapılan Commit: {commits}\n• Değişiklik Olan Depolar: {dirty}\n• Taranan Depolar: {total}\n\n[Sol Tık] Git Panelini Aç"
+    print(json.dumps({"text": text, "tooltip": tooltip, "class": css}))
+
+if __name__ == "__main__":
+    main()

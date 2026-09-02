@@ -3,12 +3,16 @@ import os
 import subprocess
 import json
 import time
+import re
 
 MAX_REPOS = 20
 MAX_DEPTH = 3
-SCAN_TIMEOUT = 2.5
+TOTAL_SCAN_BUDGET = 2.0 # Total monotonic scan deadline for the whole script
 
-def get_git_repos():
+def sanitize_str(s, max_len=60):
+    return re.sub(r'[\x00-\x1f\x7f-\x9f]', '', str(s))[:max_len]
+
+def get_git_repos(start_time):
     home = os.path.expanduser("~")
     search_roots = [
         os.path.join(home, "Projects"),
@@ -18,52 +22,62 @@ def get_git_repos():
     ]
     
     repos = []
-    start_time = time.time()
-
     for root in search_roots:
         if not os.path.exists(root):
             continue
         for dirpath, dirnames, _ in os.walk(root):
-            # Enforce hard time and count budgets
-            if time.time() - start_time > SCAN_TIMEOUT or len(repos) >= MAX_REPOS:
-                break
-            # Skip hidden / deep folders
+            if time.monotonic() - start_time > TOTAL_SCAN_BUDGET or len(repos) >= MAX_REPOS:
+                return repos
             depth = len(os.path.relpath(dirpath, root).split(os.sep))
             if depth > MAX_DEPTH:
                 dirnames.clear()
                 continue
             if ".git" in dirnames:
                 repos.append(dirpath)
-                dirnames.remove(".git") # Don't descend into .git
+                dirnames.remove(".git")
                 if len(repos) >= MAX_REPOS:
-                    break
+                    return repos
     return repos
 
-def inspect_repo(repo_path):
-    try:
-        # Check uncommitted changes (bounded timeout)
-        res_status = subprocess.run(
-            ["git", "-C", repo_path, "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=0.5,
-            check=False
-        )
-        is_dirty = bool(res_status.stdout.strip())
+def inspect_repo(repo_path, start_time):
+    # Enforce overall time budget before launching subcommands
+    if time.monotonic() - start_time > TOTAL_SCAN_BUDGET:
+        return None
 
-        # Count today's commits by author
-        res_log = subprocess.run(
-            ["git", "-C", repo_path, "log", "--since=midnight", "--oneline"],
+    is_dirty = False
+    today_commits = 0
+    
+    try:
+        # Check uncommitted changes (git status)
+        res_status = subprocess.run(
+            ["/usr/bin/git", "-C", repo_path, "status", "--porcelain"],
             capture_output=True,
             text=True,
-            timeout=0.5,
+            timeout=0.3,
+            env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
             check=False
         )
-        today_commits = len(res_log.stdout.strip().splitlines()) if res_log.stdout.strip() else 0
+        if res_status.returncode == 0:
+            is_dirty = bool(res_status.stdout.strip())
+
+        # Check today's commits (git log)
+        if time.monotonic() - start_time > TOTAL_SCAN_BUDGET:
+            return None
+
+        res_log = subprocess.run(
+            ["/usr/bin/git", "-C", repo_path, "log", "--since=midnight", "--oneline", "-n", "30"],
+            capture_output=True,
+            text=True,
+            timeout=0.3,
+            env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+            check=False
+        )
+        if res_log.returncode == 0 and res_log.stdout.strip():
+            today_commits = len(res_log.stdout.strip().splitlines())
 
         return {
-            "name": os.path.basename(repo_path)[:30],
-            "path": repo_path[:80],
+            "name": sanitize_str(os.path.basename(repo_path), 30),
+            "path": sanitize_str(repo_path, 80),
             "is_dirty": is_dirty,
             "today_commits": today_commits
         }
@@ -71,31 +85,34 @@ def inspect_repo(repo_path):
         return None
 
 def main():
+    start_time = time.monotonic()
     try:
-        repos = get_git_repos()
+        repos = get_git_repos(start_time)
         repo_data = []
-        total_commits_today = 0
-        dirty_repos_count = 0
+        total_commits = 0
+        dirty_count = 0
 
         for r in repos:
-            info = inspect_repo(r)
+            if time.monotonic() - start_time > TOTAL_SCAN_BUDGET:
+                break
+            info = inspect_repo(r, start_time)
             if info:
                 repo_data.append(info)
-                total_commits_today += info["today_commits"]
+                total_commits += info["today_commits"]
                 if info["is_dirty"]:
-                    dirty_repos_count += 1
+                    dirty_count += 1
 
         print(json.dumps({
             "status": "OK",
             "total_repos_scanned": len(repo_data),
-            "today_commits": total_commits_today,
-            "dirty_repos_count": dirty_repos_count,
+            "today_commits": total_commits,
+            "dirty_repos_count": dirty_count,
             "repositories": repo_data[:15]
         }))
     except Exception as e:
         print(json.dumps({
             "status": "UNKNOWN",
-            "error": str(e)[:60],
+            "error": sanitize_str(str(e), 50),
             "total_repos_scanned": 0,
             "today_commits": 0,
             "dirty_repos_count": 0,

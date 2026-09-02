@@ -16,7 +16,7 @@ Panel {
 
   Process {
     id: scanProc
-    command: ["git-scanner"]
+    command: [Qt.resolvedUrl("git-scanner").toString().replace(/^file:\/\//, "")]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -83,7 +83,8 @@ Panel {
         text: "📊 Depo Panosunu Aç"
         onClicked: {
           root.close()
-          if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation git-dashboard")
+          var dashPath = Qt.resolvedUrl("git-dashboard").toString().replace(/^file:\/\//, "")
+          if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation " + dashPath)
         }
       }
     }
