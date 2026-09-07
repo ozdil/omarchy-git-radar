@@ -65,7 +65,7 @@ Panel {
   }
 
   Component.onCompleted: refresh()
-  Component.onDestruction: if (scanProc.running) scanProc.kill()
+  Component.onDestruction: if (scanProc.running) scanProc.running = false
 
   Timer {
     interval: 15000
@@ -164,17 +164,81 @@ Panel {
           columnSpacing: Style.space(16)
           rowSpacing: Style.spacing.labelGap
 
-          InfoLabel { text: "Total Repos" }
-          DetailValue { text: String(root.totalRepos) }
+          Text {
+            textFormat: Text.PlainText
+            text: "Total Repos"
+            color: root.bar ? root.bar.foreground : Color.foreground
+            opacity: 0.6
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+          }
+          Text {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignRight
+            text: String(root.totalRepos)
+            color: root.bar ? root.bar.foreground : Color.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
 
-          InfoLabel { text: "Dirty Repos" }
-          DetailValue { text: String(root.dirtyRepos) }
+          Text {
+            textFormat: Text.PlainText
+            text: "Dirty Repos"
+            color: root.bar ? root.bar.foreground : Color.foreground
+            opacity: 0.6
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+          }
+          Text {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignRight
+            text: String(root.dirtyRepos)
+            color: root.bar ? root.bar.foreground : Color.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
 
-          InfoLabel { text: "Modified Files" }
-          DetailValue { text: String(root.totalModified) }
+          Text {
+            textFormat: Text.PlainText
+            text: "Modified Files"
+            color: root.bar ? root.bar.foreground : Color.foreground
+            opacity: 0.6
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+          }
+          Text {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignRight
+            text: String(root.totalModified)
+            color: root.bar ? root.bar.foreground : Color.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
 
-          InfoLabel { text: "Engine" }
-          DetailValue { text: "Native Rust (x86_64)" }
+          Text {
+            textFormat: Text.PlainText
+            text: "Engine"
+            color: root.bar ? root.bar.foreground : Color.foreground
+            opacity: 0.6
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+          }
+          Text {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignRight
+            text: "Native Rust (x86_64)"
+            color: root.bar ? root.bar.foreground : Color.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
         }
       }
 
@@ -245,4 +309,5 @@ Panel {
       }
     }
   }
-}
+
+  }
