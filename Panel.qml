@@ -78,11 +78,8 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "\uf02a2"
-    foreground: root.dirtyRepos > 0 ? "#f59e0b" : (root.bar ? root.bar.foreground : Color.foreground)
-    slotSize: Style.bar.statusSlot
-    tooltipText: "Git Radar - Developer Pulse\nRepositories: " + root.totalRepos + "\nModified (Dirty): " + root.dirtyRepos + "\nUncommitted: " + root.totalModified + "\n\n[Left Click] Open Git Dashboard"
-
+    text: ""
+    tooltipText: "Git Radar"
     onPressed: function(b) {
       if (root.opened) root.close()
       else root.open()
