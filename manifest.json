@@ -2,21 +2,15 @@
   "schemaVersion": 1,
   "id": "ozdil.git-radar",
   "name": "Git Radar",
-  "version": "1.0.1",
-  "author": "Ozan Özdil (ozdil)",
+  "description": "Developer pulse, live commit activity and multi-repo tracker for Omarchy Linux",
+  "version": "1.1.0",
+  "author": "Ozan Özdil",
   "license": "MIT",
-  "description": "Developer commit tracker and multi-repo workspace watchdog for Omarchy.",
   "kinds": ["bar-widget"],
-  "activation": "on-demand",
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Git Radar",
-    "description": "Developer commit tracker and multi-repo workspace watchdog.",
-    "category": "Developer Tools",
-    "defaultSection": "right",
-    "aliases": ["git", "radar", "commits", "repos", "code"],
-    "allowMultiple": false
+    "defaultSection": "right"
   }
 }

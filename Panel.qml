@@ -9,82 +9,238 @@ Panel {
   id: root
   moduleName: "ozdil.git-radar"
   ipcTarget: "ozdil.git-radar"
+  manageIpc: false
 
-  property int todayCommits: 0
-  property int dirtyCount: 0
-  property string statusText: "Yükleniyor..."
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
+  property string barText: "GIT: SCANNING"
+  property int totalRepos: 0
+  property int dirtyRepos: 0
+  property int totalModified: 0
+  property var repos: []
+
+  function resolveEnginePath() {
+    return Qt.resolvedUrl("gitradar-engine").toString().replace(/^file:\/\//, "")
+  }
+
+  function refresh() {
+    if (!scanProc.running) {
+      scanProc.running = true
+    }
+  }
+
+  IpcHandler {
+    target: "ozdil.git-radar"
+    function open() { root.open() }
+    function close() { root.close() }
+    function toggle() { root.toggle() }
+    function refresh() { root.refresh() }
+  }
 
   Process {
     id: scanProc
-    command: [Qt.resolvedUrl("git-scanner").toString().replace(/^file:\/\//, "")]
+    command: [root.resolveEnginePath(), "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         try {
-          var parsed = JSON.parse(text)
-          root.todayCommits = parsed.today_commits || 0
-          root.dirtyCount = parsed.dirty_repos_count || 0
-          root.statusText = parsed.status || "UNKNOWN"
+          var clean = String(text || "").slice(0, 65536)
+          var d = JSON.parse(clean)
+          root.totalRepos = Number(d.total_repos) || 0
+          root.dirtyRepos = Number(d.dirty_repos) || 0
+          root.totalModified = Number(d.total_modified) || 0
+          root.repos = d.repos || []
+
+          if (root.dirtyRepos > 0) {
+            root.barText = "GIT: " + root.dirtyRepos + " DIRTY"
+          } else {
+            root.barText = "GIT: CLEAN (" + root.totalRepos + ")"
+          }
         } catch(e) {
-          root.statusText = "ERROR"
+          root.barText = "GIT: UNKNOWN"
         }
       }
     }
   }
 
+  Component.onCompleted: refresh()
+  Component.onDestruction: if (scanProc.running) scanProc.kill()
+
   Timer {
-    interval: 10000
+    interval: 15000
     running: true
     repeat: true
-    triggeredOnStart: true
-    onTriggered: {
-      if (!scanProc.running) scanProc.running = true
-    }
+    onTriggered: refresh()
   }
 
-  BarIconButton {
+  WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰊢 " + root.todayCommits + (root.dirtyCount > 0 ? " (󱇬" + root.dirtyCount + ")" : "")
-    slotSize: Style.bar.statusSlot
-    tooltipText: "Git Radar: " + root.todayCommits + " commits today"
-    onPressed: root.toggle()
+    text: root.barText
+    tooltipText: "Git Radar - Developer Pulse\nTotal Repos: " + root.totalRepos + "\nDirty Repos: " + root.dirtyRepos
+
+    onPressed: function(b) {
+      if (root.opened) root.close()
+      else root.open()
+    }
   }
 
   KeyboardPanel {
     id: panel
     anchorItem: button
     owner: root
-    width: 420
-    contentHeight: panel.fittedContentHeight(mainCol.implicitHeight)
+    bar: root.bar
+    open: root.opened
+    contentWidth: panel.fittedContentWidth(Style.space(480))
+    contentHeight: panel.fittedContentHeight(contentCol.implicitHeight)
 
     Column {
-      id: mainCol
+      id: contentCol
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.top: parent.top
       spacing: Style.space(12)
 
-      Text {
-        text: "⚡ Git Radar"
-        font.pixelSize: Style.font.title
-        font.bold: true
-        color: root.bar ? root.bar.foreground : "#ffffff"
-      }
-
-      Text {
-        text: "Bugün: " + root.todayCommits + " Commit | Değişiklik Olan: " + root.dirtyCount + " Depo"
-        color: root.dirtyCount > 0 ? "#f59e0b" : "#60a5fa"
-      }
-
-      Button {
+      // ---------- Header ----------
+      Item {
         width: parent.width
-        text: "📊 Depo Panosunu Aç"
-        onClicked: {
-          root.close()
-          var dashPath = Qt.resolvedUrl("git-dashboard").toString().replace(/^file:\/\//, "")
-          if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation " + dashPath)
+        implicitHeight: Math.max(heroLabels.implicitHeight, heroActions.implicitHeight)
+
+        Column {
+          id: heroLabels
+          anchors.left: parent.left
+          anchors.right: heroActions.left
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(2)
+
+          Text {
+            textFormat: Text.PlainText
+            text: "GIT RADAR"
+            color: root.bar ? root.bar.foreground : Color.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.title
+            font.bold: true
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            text: "DEVELOPER REPOSITORY PULSE - " + (root.dirtyRepos > 0 ? (root.dirtyRepos + " UNCOMMITTED REPOS") : "ALL REPOSITORIES CLEAN")
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.2
+          }
+        }
+
+        RowLayout {
+          id: heroActions
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(6)
+
+          Button {
+            text: "Refresh"
+            onClicked: root.refresh()
+          }
+        }
+      }
+
+      PanelSeparator {
+        foreground: root.bar ? root.bar.foreground : Color.foreground
+      }
+
+      // ---------- Telemetry Grid ----------
+      Column {
+        width: parent.width
+        spacing: Style.spacing.labelGap
+
+        GridLayout {
+          width: parent.width
+          columns: 4
+          columnSpacing: Style.space(16)
+          rowSpacing: Style.spacing.labelGap
+
+          InfoLabel { text: "Total Repos" }
+          DetailValue { text: String(root.totalRepos) }
+
+          InfoLabel { text: "Dirty Repos" }
+          DetailValue { text: String(root.dirtyRepos) }
+
+          InfoLabel { text: "Modified Files" }
+          DetailValue { text: String(root.totalModified) }
+
+          InfoLabel { text: "Engine" }
+          DetailValue { text: "Native Rust (x86_64)" }
+        }
+      }
+
+      PanelSeparator {
+        foreground: root.bar ? root.bar.foreground : Color.foreground
+      }
+
+      // ---------- Repositories List ----------
+      Column {
+        width: parent.width
+        spacing: Style.space(6)
+
+        PanelSectionHeader {
+          text: "RECENT MONITORED REPOSITORIES"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+
+          Repeater {
+            model: Math.min(root.repos.length, 6)
+            delegate: Item {
+              width: parent.width
+              height: Style.space(26)
+
+              readonly property var itemData: root.repos[index]
+
+              RowLayout {
+                anchors.fill: parent
+                spacing: Style.space(8)
+
+                Text {
+                  textFormat: Text.PlainText
+                  Layout.preferredWidth: Style.space(140)
+                  text: itemData ? String(itemData.name) : "--"
+                  color: (itemData && itemData.dirty) ? "#ef4444" : (root.bar ? root.bar.foreground : Color.foreground)
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.body
+                  font.bold: itemData && itemData.dirty
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  Layout.preferredWidth: Style.space(70)
+                  text: itemData ? ("[" + String(itemData.branch) + "]") : "--"
+                  color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  Layout.fillWidth: true
+                  text: itemData ? (itemData.dirty ? (String(itemData.modified_count) + " files modified") : "Clean") : "--"
+                  color: (itemData && itemData.dirty) ? "#ef4444" : Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.3)
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+          }
         }
       }
     }
