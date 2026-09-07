@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-const MAX_REPOS: usize = 30;
+const MAX_REPOS: usize = 50;
 const MAX_DEPTH: usize = 3;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -15,7 +15,14 @@ pub struct RepoInfo {
     pub branch: String,
     pub dirty: bool,
     pub modified_count: usize,
+    pub untracked_count: usize,
+    pub staged_count: usize,
+    pub ahead: usize,
+    pub behind: usize,
     pub last_commit: String,
+    pub last_commit_author: String,
+    pub last_commit_time: String,
+    pub modified_files: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -52,7 +59,7 @@ fn scan_dir(dir: &Path, depth: usize, repos: &mut Vec<PathBuf>, deadline: Instan
                 if ft.is_dir() {
                     let name = entry.file_name();
                     let name_str = name.to_string_lossy();
-                    if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" {
+                    if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" || name_str == "vendor" {
                         continue;
                     }
                     scan_dir(&entry.path(), depth + 1, repos, deadline);
@@ -64,7 +71,7 @@ fn scan_dir(dir: &Path, depth: usize, repos: &mut Vec<PathBuf>, deadline: Instan
 
 fn find_repos() -> Vec<PathBuf> {
     let mut repos = Vec::new();
-    let deadline = Instant::now() + std::time::Duration::from_millis(1500);
+    let deadline = Instant::now() + std::time::Duration::from_millis(3000);
     if let Ok(home) = env::var("HOME") {
         let home_p = Path::new(&home);
         let roots = [
@@ -96,21 +103,91 @@ fn inspect_repo(repo_path: &Path) -> RepoInfo {
         .unwrap_or_else(|_| "main".to_string());
 
     let mut modified_count = 0;
-    let mut dirty = false;
+    let mut untracked_count = 0;
+    let mut staged_count = 0;
+    let mut modified_files = Vec::new();
+
     if let Ok(out) = Command::new("git")
-        .args(["-C", &path_str, "status", "--porcelain"])
+        .args(["-C", &path_str, "status", "--porcelain=v1"])
         .output()
     {
         let out_str = String::from_utf8_lossy(&out.stdout);
-        modified_count = out_str.lines().count();
-        dirty = modified_count > 0;
+        for line in out_str.lines() {
+            if line.len() < 3 {
+                continue;
+            }
+            modified_count += 1;
+            let status_code = &line[0..2];
+            let filename = line[3..].trim();
+
+            let tag = match status_code {
+                "??" => {
+                    untracked_count += 1;
+                    "[NEW]"
+                }
+                "A " | "AM" => {
+                    staged_count += 1;
+                    "[ADD]"
+                }
+                "D " => {
+                    staged_count += 1;
+                    "[DEL]"
+                }
+                " D" => "[DEL]",
+                "M " | "MM" => {
+                    staged_count += 1;
+                    "[STG]"
+                }
+                " M" => "[MOD]",
+                "R " | " R" => "[REN]",
+                _ => "[MOD]",
+            };
+
+            if modified_files.len() < 12 {
+                modified_files.push(format!("{} {}", tag, filename));
+            }
+        }
+        if modified_count > modified_files.len() {
+            modified_files.push(format!("... and {} more files", modified_count - modified_files.len()));
+        }
+    }
+    let dirty = modified_count > 0;
+
+    let mut ahead = 0;
+    let mut behind = 0;
+    if let Ok(out) = Command::new("git")
+        .args(["-C", &path_str, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
+        .output()
+    {
+        if out.status.success() {
+            let out_str = String::from_utf8_lossy(&out.stdout);
+            let parts: Vec<&str> = out_str.trim().split_whitespace().collect();
+            if parts.len() == 2 {
+                behind = parts[0].parse::<usize>().unwrap_or(0);
+                ahead = parts[1].parse::<usize>().unwrap_or(0);
+            }
+        }
     }
 
-    let last_commit = Command::new("git")
-        .args(["-C", &path_str, "log", "-1", "--format=%h %s (%cr)"])
+    let mut last_commit = "No commits yet".to_string();
+    let mut last_commit_author = "".to_string();
+    let mut last_commit_time = "".to_string();
+
+    if let Ok(out) = Command::new("git")
+        .args(["-C", &path_str, "log", "-1", "--format=%h|%s|%an|%cr"])
         .output()
-        .map(|o| sanitize(&String::from_utf8_lossy(&o.stdout).trim(), 60))
-        .unwrap_or_else(|_| "No commits yet".to_string());
+    {
+        let out_str = String::from_utf8_lossy(&out.stdout);
+        let trimmed = out_str.trim();
+        let parts: Vec<&str> = trimmed.split('|').collect();
+        if parts.len() >= 4 {
+            last_commit = format!("{} {}", parts[0], sanitize(parts[1], 45));
+            last_commit_author = sanitize(parts[2], 25);
+            last_commit_time = sanitize(parts[3], 25);
+        } else if !trimmed.is_empty() {
+            last_commit = sanitize(trimmed, 60);
+        }
+    }
 
     RepoInfo {
         name,
@@ -118,7 +195,14 @@ fn inspect_repo(repo_path: &Path) -> RepoInfo {
         branch: if branch.is_empty() { "HEAD".to_string() } else { branch },
         dirty,
         modified_count,
+        untracked_count,
+        staged_count,
+        ahead,
+        behind,
         last_commit,
+        last_commit_author,
+        last_commit_time,
+        modified_files,
     }
 }
 
@@ -149,6 +233,23 @@ fn scan() -> ScanResult {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+
+    if args.len() >= 3 && args[1] == "--open-terminal" {
+        let path = &args[2];
+        let _ = Command::new("xdg-terminal-exec")
+            .arg(format!("--dir={}", path))
+            .spawn();
+        return;
+    }
+
+    if args.len() >= 3 && args[1] == "--open-files" {
+        let path = &args[2];
+        let _ = Command::new("xdg-open")
+            .arg(path)
+            .spawn();
+        return;
+    }
+
     let res = scan();
 
     if args.iter().any(|a| a == "--status") {
