@@ -657,7 +657,7 @@ Panel {
 
                       Button {
                         text: "Files"
-                        iconText: "📁"
+                        iconText: ""
                         bordered: true
                         fontSize: Style.font.caption
                         horizontalPadding: Style.space(10)
