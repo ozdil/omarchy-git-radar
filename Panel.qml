@@ -74,12 +74,14 @@ Panel {
     onTriggered: refresh()
   }
 
-  WidgetButton {
+  BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.barText
-    tooltipText: "Git Radar - Developer Pulse\nTotal Repos: " + root.totalRepos + "\nDirty Repos: " + root.dirtyRepos
+    text: "\uf02a2"
+    foreground: root.dirtyRepos > 0 ? "#f59e0b" : (root.bar ? root.bar.foreground : Color.foreground)
+    slotSize: Style.bar.statusSlot
+    tooltipText: "Git Radar - Developer Pulse\nRepositories: " + root.totalRepos + "\nModified (Dirty): " + root.dirtyRepos + "\nUncommitted: " + root.totalModified + "\n\n[Left Click] Open Git Dashboard"
 
     onPressed: function(b) {
       if (root.opened) root.close()
