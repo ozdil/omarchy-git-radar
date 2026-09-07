@@ -276,7 +276,7 @@ Panel {
                   textFormat: Text.PlainText
                   Layout.preferredWidth: Style.space(140)
                   text: itemData ? String(itemData.name) : "--"
-                  color: (itemData && itemData.dirty) ? "#ef4444" : (root.bar ? root.bar.foreground : Color.foreground)
+                  color: (itemData && itemData.dirty) ? Color.urgent : (root.bar ? root.bar.foreground : Color.foreground)
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.body
                   font.bold: itemData && itemData.dirty
@@ -297,7 +297,7 @@ Panel {
                   textFormat: Text.PlainText
                   Layout.fillWidth: true
                   text: itemData ? (itemData.dirty ? (String(itemData.modified_count) + " files modified") : "Clean") : "--"
-                  color: (itemData && itemData.dirty) ? "#ef4444" : Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.3)
+                  color: (itemData && itemData.dirty) ? Color.urgent : Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.3)
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption
                 }

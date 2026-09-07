@@ -1,49 +1,53 @@
 # ⚡ Git Radar • Omarchy Developer Commit & Multi-Repo Watchdog
 
-> **Developer commit tracker and workspace watchdog plugin for Omarchy 4.0.2+.**
+> **Real-time multi-repository watchdog, dirty state detector, and developer pulse for Omarchy Linux.**
 
 Author: **Ozan Özdil (ozdil)**  
-License: **MIT**
+License: **MIT**  
+Plugin ID: `ozdil.git-radar`
 
 ---
 
 ## ✨ Features
 
-- 📊 **Commit Tracker:** Scans bounded local workspace repositories and aggregates today's commit activity.
-- ⚠️ **Dirty State Detection:** Instantly notifies uncommitted work across monitored git projects.
-- ⏱️ **Resource-Constrained:** Strict timeout budgets (max 2.5s) and bounded recursion depth (max 3 levels).
-- 🛡️ **Zero Hardcoded Paths:** Dynamically resolves plugin-relative helpers.
+- 📊 **Developer Pulse:** Continuously scans workspace directories and detects git repositories up to 3 levels deep.
+- ⚠️ **Dirty State Detection:** Instantly alerts uncommitted modifications or staged changes.
+- 📈 **Commit Aggregation:** Real-time statistics on total repositories, dirty repositories, and modified files.
+- 🎨 **100% Native Omarchy Design:** Matches the active Omarchy theme (`Color.popups.*`, `Color.accent`, `Color.urgent`, `Style.selectedFillFor`).
+- ⚡ **Native Rust Engine:** High-performance scanning engine (`gitradar-engine`) executing within strict timeout and memory budgets.
 
 ---
 
 ## 📋 Requirements
 
 - `git`
-- `python3` (>= 3.10)
+- `cargo` (Rust toolchain, for building from source)
 
 ---
 
-## 🚀 Installation & Removal
+## 🚀 Installation & Setup
 
-### Installation
+### 1. Clone to Omarchy Plugins Directory
 ```bash
-git clone https://github.com/ozdil/omarchy-git-radar.git ~/.config/omarchy/plugins/git-radar
-chmod +x ~/.config/omarchy/plugins/git-radar/git-*
+git clone https://github.com/ozdil/omarchy-git-radar.git ~/.config/omarchy/plugins/ozdil.git-radar
 ```
 
-Add to `~/.config/omarchy/shell.json`:
+### 2. Build Native Engine
+```bash
+cd ~/.config/omarchy/plugins/ozdil.git-radar
+cargo build --release
+cp target/release/gitradar-engine .
+```
+
+### 3. Add to Omarchy Shell Configuration
+Add `ozdil.git-radar` to `bar.layout.right` in `~/.config/omarchy/shell.json`:
 ```json
 {
-  "id": "git-radar",
-  "exec": "$HOME/.config/omarchy/plugins/git-radar/git-status",
-  "interval": 10,
-  "onClick": "omarchy-launch-floating-terminal-with-presentation $HOME/.config/omarchy/plugins/git-radar/git-dashboard"
+  "id": "ozdil.git-radar"
 }
 ```
 
-### Removal
+### 4. Restart Shell
 ```bash
-rm -rf ~/.config/omarchy/plugins/git-radar
-# Remove the "git-radar" entry from ~/.config/omarchy/shell.json and run:
 omarchy-restart-shell
 ```
