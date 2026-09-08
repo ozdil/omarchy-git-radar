@@ -46,6 +46,7 @@ Panel {
 
   function refresh() {
     if (!scanProc.running) {
+      scanWatchdogTimer.restart()
       scanProc.running = true
     }
   }
@@ -60,11 +61,13 @@ Panel {
 
   function openTerminal(path) {
     actionTarget = path
+    termWatchdogTimer.restart()
     termProc.running = true
   }
 
   function openFiles(path) {
     actionTarget = path
+    filesWatchdogTimer.restart()
     filesProc.running = true
   }
 
@@ -78,22 +81,63 @@ Panel {
     function setFilter(mode: string): void { root.setFilter(mode) }
   }
 
+  Timer {
+    id: scanWatchdogTimer
+    interval: 4000
+    repeat: false
+    onTriggered: {
+      if (scanProc.running) {
+        scanProc.running = false
+        scanProc.kill()
+        root.barText = "GIT: TIMEOUT"
+      }
+    }
+  }
+
+  Timer {
+    id: termWatchdogTimer
+    interval: 3000
+    repeat: false
+    onTriggered: {
+      if (termProc.running) {
+        termProc.running = false
+        termProc.kill()
+      }
+    }
+  }
+
+  Timer {
+    id: filesWatchdogTimer
+    interval: 3000
+    repeat: false
+    onTriggered: {
+      if (filesProc.running) {
+        filesProc.running = false
+        filesProc.kill()
+      }
+    }
+  }
+
   Process {
     id: termProc
     command: [root.resolveEnginePath(), "--open-terminal", root.actionTarget]
+    onExited: termWatchdogTimer.stop()
   }
 
   Process {
     id: filesProc
     command: [root.resolveEnginePath(), "--open-files", root.actionTarget]
+    onExited: filesWatchdogTimer.stop()
   }
 
   Process {
     id: scanProc
     command: [root.resolveEnginePath(), "--json"]
+    onExited: scanWatchdogTimer.stop()
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        scanWatchdogTimer.stop()
         try {
           var clean = String(text || "").slice(0, 65536)
           var d = JSON.parse(clean)
@@ -121,9 +165,21 @@ Panel {
 
   Component.onCompleted: refresh()
   Component.onDestruction: {
-    if (scanProc.running) scanProc.running = false
-    if (termProc.running) termProc.running = false
-    if (filesProc.running) filesProc.running = false
+    scanWatchdogTimer.stop()
+    termWatchdogTimer.stop()
+    filesWatchdogTimer.stop()
+    if (scanProc.running) {
+      scanProc.running = false
+      scanProc.kill()
+    }
+    if (termProc.running) {
+      termProc.running = false
+      termProc.kill()
+    }
+    if (filesProc.running) {
+      filesProc.running = false
+      filesProc.kill()
+    }
   }
 
   Timer {

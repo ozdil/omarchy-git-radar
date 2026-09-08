@@ -1,12 +1,37 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::io::Read;
+use std::os::unix::io::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-const MAX_REPOS: usize = 50;
+const MAX_REPOS: usize = 20;
 const MAX_DEPTH: usize = 3;
+const WHOLE_SCAN_DEADLINE_MS: u64 = 2500;
+
+const CAP_STATUS_BYTES: usize = 65536; // 64 KiB
+const CAP_REV_LIST_BYTES: usize = 512;
+const CAP_LOG_BYTES: usize = 2048;
+const CAP_BRANCH_BYTES: usize = 512;
+
+#[repr(C)]
+struct PollFd {
+    fd: i32,
+    events: i16,
+    revents: i16,
+}
+
+const POLLIN: i16 = 0x0001;
+const POLLHUP: i16 = 0x0010;
+const POLLERR: i16 = 0x0008;
+
+extern "C" {
+    fn poll(fds: *mut PollFd, nfds: usize, timeout: i32) -> i32;
+    fn kill(pid: i32, sig: i32) -> i32;
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RepoInfo {
@@ -44,8 +69,131 @@ fn sanitize(s: &str, max_len: usize) -> String {
     s.chars().filter(|c| !c.is_control()).take(max_len).collect()
 }
 
+fn reap_process_group(mut child: std::process::Child, pid: i32) {
+    unsafe {
+        // Send SIGTERM to entire process group
+        kill(-pid, 15);
+    }
+    std::thread::sleep(Duration::from_millis(5));
+    unsafe {
+        // Enforce SIGKILL to entire process group
+        kill(-pid, 9);
+    }
+    let _ = child.wait();
+}
+
+fn run_git_bounded(
+    repo_path: &Path,
+    args: &[&str],
+    deadline: Instant,
+    max_output_bytes: usize,
+) -> Option<String> {
+    let now = Instant::now();
+    if now >= deadline {
+        return None;
+    }
+
+    let mut cmd = Command::new("git");
+    cmd.args(["-C", &repo_path.to_string_lossy()])
+        .args(args)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("LC_ALL", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    cmd.process_group(0);
+
+    let mut child = cmd.spawn().ok()?;
+    let pid = child.id() as i32;
+    let mut stdout = child.stdout.take()?;
+    let raw_fd = stdout.as_raw_fd();
+
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let mut timed_out = false;
+    let mut overrun = false;
+
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            timed_out = true;
+            break;
+        }
+        let remaining_ms = (deadline - now).as_millis().min(50) as i32;
+        let mut pfd = PollFd {
+            fd: raw_fd,
+            events: POLLIN | POLLHUP | POLLERR,
+            revents: 0,
+        };
+
+        let ret = unsafe { poll(&mut pfd, 1, remaining_ms) };
+        if ret < 0 {
+            continue;
+        } else if ret == 0 {
+            if let Ok(Some(_)) = child.try_wait() {
+                while let Ok(n) = stdout.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    if buffer.len() + n > max_output_bytes {
+                        let take = max_output_bytes.saturating_sub(buffer.len());
+                        buffer.extend_from_slice(&chunk[..take]);
+                        overrun = true;
+                        break;
+                    }
+                    buffer.extend_from_slice(&chunk[..n]);
+                }
+                break;
+            }
+            continue;
+        }
+
+        if pfd.revents & POLLIN != 0 {
+            match stdout.read(&mut chunk) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    if buffer.len() + n > max_output_bytes {
+                        let take = max_output_bytes.saturating_sub(buffer.len());
+                        buffer.extend_from_slice(&chunk[..take]);
+                        overrun = true;
+                        break;
+                    }
+                    buffer.extend_from_slice(&chunk[..n]);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        } else if pfd.revents & (POLLHUP | POLLERR) != 0 {
+            while let Ok(n) = stdout.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                if buffer.len() + n > max_output_bytes {
+                    let take = max_output_bytes.saturating_sub(buffer.len());
+                    buffer.extend_from_slice(&chunk[..take]);
+                    overrun = true;
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..n]);
+            }
+            break;
+        }
+    }
+
+    if timed_out || overrun {
+        reap_process_group(child, pid);
+    } else {
+        let _ = child.wait();
+    }
+
+    Some(String::from_utf8_lossy(&buffer).to_string())
+}
+
 fn scan_dir(dir: &Path, depth: usize, repos: &mut Vec<PathBuf>, deadline: Instant) {
-    if depth > MAX_DEPTH || repos.len() >= MAX_REPOS || Instant::now() > deadline {
+    if depth > MAX_DEPTH || repos.len() >= MAX_REPOS || Instant::now() >= deadline {
         return;
     }
     let git_dir = dir.join(".git");
@@ -55,8 +203,11 @@ fn scan_dir(dir: &Path, depth: usize, repos: &mut Vec<PathBuf>, deadline: Instan
     }
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
+            if Instant::now() >= deadline || repos.len() >= MAX_REPOS {
+                return;
+            }
             if let Ok(ft) = entry.file_type() {
-                if ft.is_dir() {
+                if ft.is_dir() && !ft.is_symlink() {
                     let name = entry.file_name();
                     let name_str = name.to_string_lossy();
                     if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" || name_str == "vendor" {
@@ -69,9 +220,8 @@ fn scan_dir(dir: &Path, depth: usize, repos: &mut Vec<PathBuf>, deadline: Instan
     }
 }
 
-fn find_repos() -> Vec<PathBuf> {
+fn find_repos(deadline: Instant) -> Vec<PathBuf> {
     let mut repos = Vec::new();
-    let deadline = Instant::now() + std::time::Duration::from_millis(3000);
     if let Ok(home) = env::var("HOME") {
         let home_p = Path::new(&home);
         let roots = [
@@ -82,6 +232,9 @@ fn find_repos() -> Vec<PathBuf> {
             home_p.join(".config/omarchy/plugins"),
         ];
         for root in &roots {
+            if Instant::now() >= deadline || repos.len() >= MAX_REPOS {
+                break;
+            }
             if root.exists() {
                 scan_dir(root, 0, &mut repos, deadline);
             }
@@ -90,28 +243,22 @@ fn find_repos() -> Vec<PathBuf> {
     repos
 }
 
-fn inspect_repo(repo_path: &Path) -> RepoInfo {
+fn inspect_repo(repo_path: &Path, deadline: Instant) -> RepoInfo {
     let name = repo_path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "repo".to_string());
     let path_str = repo_path.to_string_lossy().to_string();
 
-    let branch = Command::new("git")
-        .args(["-C", &path_str, "branch", "--show-current"])
-        .output()
-        .map(|o| sanitize(&String::from_utf8_lossy(&o.stdout).trim(), 25))
-        .unwrap_or_else(|_| "main".to_string());
+    let branch = run_git_bounded(repo_path, &["branch", "--show-current"], deadline, CAP_BRANCH_BYTES)
+        .map(|o| sanitize(o.trim(), 25))
+        .unwrap_or_else(|| "HEAD".to_string());
 
     let mut modified_count = 0;
     let mut untracked_count = 0;
     let mut staged_count = 0;
     let mut modified_files = Vec::new();
 
-    if let Ok(out) = Command::new("git")
-        .args(["-C", &path_str, "status", "--porcelain=v1"])
-        .output()
-    {
-        let out_str = String::from_utf8_lossy(&out.stdout);
+    if let Some(out_str) = run_git_bounded(repo_path, &["status", "--porcelain=v1"], deadline, CAP_STATUS_BYTES) {
         for line in out_str.lines() {
             if line.len() < 3 {
                 continue;
@@ -144,7 +291,7 @@ fn inspect_repo(repo_path: &Path) -> RepoInfo {
             };
 
             if modified_files.len() < 12 {
-                modified_files.push(format!("{} {}", tag, filename));
+                modified_files.push(format!("{} {}", tag, sanitize(filename, 80)));
             }
         }
         if modified_count > modified_files.len() {
@@ -155,17 +302,11 @@ fn inspect_repo(repo_path: &Path) -> RepoInfo {
 
     let mut ahead = 0;
     let mut behind = 0;
-    if let Ok(out) = Command::new("git")
-        .args(["-C", &path_str, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
-        .output()
-    {
-        if out.status.success() {
-            let out_str = String::from_utf8_lossy(&out.stdout);
-            let parts: Vec<&str> = out_str.trim().split_whitespace().collect();
-            if parts.len() == 2 {
-                behind = parts[0].parse::<usize>().unwrap_or(0);
-                ahead = parts[1].parse::<usize>().unwrap_or(0);
-            }
+    if let Some(out_str) = run_git_bounded(repo_path, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], deadline, CAP_REV_LIST_BYTES) {
+        let parts: Vec<&str> = out_str.trim().split_whitespace().collect();
+        if parts.len() == 2 {
+            behind = parts[0].parse::<usize>().unwrap_or(0);
+            ahead = parts[1].parse::<usize>().unwrap_or(0);
         }
     }
 
@@ -173,11 +314,7 @@ fn inspect_repo(repo_path: &Path) -> RepoInfo {
     let mut last_commit_author = "".to_string();
     let mut last_commit_time = "".to_string();
 
-    if let Ok(out) = Command::new("git")
-        .args(["-C", &path_str, "log", "-1", "--format=%h|%s|%an|%cr"])
-        .output()
-    {
-        let out_str = String::from_utf8_lossy(&out.stdout);
+    if let Some(out_str) = run_git_bounded(repo_path, &["log", "-1", "--format=%h|%s|%an|%cr"], deadline, CAP_LOG_BYTES) {
         let trimmed = out_str.trim();
         let parts: Vec<&str> = trimmed.split('|').collect();
         if parts.len() >= 4 {
@@ -190,8 +327,8 @@ fn inspect_repo(repo_path: &Path) -> RepoInfo {
     }
 
     RepoInfo {
-        name,
-        path: path_str,
+        name: sanitize(&name, 30),
+        path: sanitize(&path_str, 120),
         branch: if branch.is_empty() { "HEAD".to_string() } else { branch },
         dirty,
         modified_count,
@@ -207,13 +344,17 @@ fn inspect_repo(repo_path: &Path) -> RepoInfo {
 }
 
 fn scan() -> ScanResult {
-    let paths = find_repos();
+    let deadline = Instant::now() + Duration::from_millis(WHOLE_SCAN_DEADLINE_MS);
+    let paths = find_repos(deadline);
     let mut repos = Vec::new();
     let mut dirty_repos = 0;
     let mut total_modified = 0;
 
     for p in paths {
-        let info = inspect_repo(&p);
+        if Instant::now() >= deadline || repos.len() >= MAX_REPOS {
+            break;
+        }
+        let info = inspect_repo(&p, deadline);
         if info.dirty {
             dirty_repos += 1;
             total_modified += info.modified_count;
@@ -235,18 +376,22 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() >= 3 && args[1] == "--open-terminal" {
-        let path = &args[2];
-        let _ = Command::new("xdg-terminal-exec")
-            .arg(format!("--dir={}", path))
-            .spawn();
+        let raw_path = &args[2];
+        if let Ok(canonical) = fs::canonicalize(raw_path) {
+            let _ = Command::new("xdg-terminal-exec")
+                .arg(format!("--dir={}", canonical.display()))
+                .spawn();
+        }
         return;
     }
 
     if args.len() >= 3 && args[1] == "--open-files" {
-        let path = &args[2];
-        let _ = Command::new("xdg-open")
-            .arg(path)
-            .spawn();
+        let raw_path = &args[2];
+        if let Ok(canonical) = fs::canonicalize(raw_path) {
+            let _ = Command::new("xdg-open")
+                .arg(canonical)
+                .spawn();
+        }
         return;
     }
 

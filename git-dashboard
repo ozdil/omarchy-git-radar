@@ -2,12 +2,18 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="${DIR}/gitradar-engine"
+
+if [[ ! -x "${BIN}" ]] && [[ -f "${DIR}/Cargo.toml" ]]; then
+    echo "Building gitradar-engine from source..."
+    (cd "${DIR}" && cargo build --release && cp "target/release/gitradar-engine" "${BIN}" && chmod +x "${BIN}") || true
+fi
+
 if [[ -x "${BIN}" ]]; then
     clear
     "${BIN}"
     echo ""
     read -r -p "Press Enter to exit..." || true
 else
-    echo "Engine binary not found."
+    echo "Engine binary not found. Please run 'cargo build --release' in ${DIR}"
     exit 1
 fi
