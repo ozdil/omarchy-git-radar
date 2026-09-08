@@ -194,7 +194,15 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: ""
-    foreground: root.dirtyRepos > 0 ? Color.urgent : (root.bar ? root.bar.foreground : Color.foreground)
+    foreground: {
+      if (root.dirtyRepos > 3 || root.totalModified > 20) {
+        return Color.urgent // High alert: heavy uncommitted backlog
+      } else if (root.dirtyRepos > 0) {
+        return "#f59e0b" // Warning: uncommitted changes in progress
+      } else {
+        return root.bar ? root.bar.foreground : Color.foreground // Clean: all repos committed
+      }
+    }
     tooltipText: root.dirtyRepos > 0
                  ? ("Git Radar: " + root.dirtyRepos + " uncommitted repos (" + root.totalModified + " files)")
                  : ("Git Radar: All " + root.totalRepos + " repositories clean")
