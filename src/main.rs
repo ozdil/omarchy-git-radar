@@ -69,12 +69,18 @@ fn sanitize(s: &str, max_len: usize) -> String {
     s.chars().filter(|c| !c.is_control()).take(max_len).collect()
 }
 
-fn reap_process_group(mut child: std::process::Child, pid: i32) {
+fn reap_process_group(child: &mut std::process::Child, pid: i32) {
+    if let Ok(Some(_)) = child.try_wait() {
+        return;
+    }
     unsafe {
         // Send SIGTERM to entire process group
         kill(-pid, 15);
     }
     std::thread::sleep(Duration::from_millis(5));
+    if let Ok(Some(_)) = child.try_wait() {
+        return;
+    }
     unsafe {
         // Enforce SIGKILL to entire process group
         kill(-pid, 9);
@@ -88,8 +94,7 @@ fn run_git_bounded(
     deadline: Instant,
     max_output_bytes: usize,
 ) -> Option<String> {
-    let now = Instant::now();
-    if now >= deadline {
+    if Instant::now() >= deadline {
         return None;
     }
 
@@ -113,27 +118,19 @@ fn run_git_bounded(
 
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 4096];
-    let mut timed_out = false;
+    let mut stdout_closed = false;
     let mut overrun = false;
+    let mut failed = false;
 
     loop {
-        let now = Instant::now();
-        if now >= deadline {
-            timed_out = true;
+        if Instant::now() >= deadline {
             break;
         }
-        let remaining_ms = (deadline - now).as_millis().min(50) as i32;
-        let mut pfd = PollFd {
-            fd: raw_fd,
-            events: POLLIN | POLLHUP | POLLERR,
-            revents: 0,
-        };
 
-        let ret = unsafe { poll(&mut pfd, 1, remaining_ms) };
-        if ret < 0 {
-            continue;
-        } else if ret == 0 {
-            if let Ok(Some(_)) = child.try_wait() {
+        // Check if child has already exited
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                // Child has terminated; drain any remaining buffered stdout data up to cap
                 while let Ok(n) = stdout.read(&mut chunk) {
                     if n == 0 {
                         break;
@@ -148,12 +145,50 @@ fn run_git_bounded(
                 }
                 break;
             }
+            Ok(None) => {}
+            Err(_) => {
+                failed = true;
+                break;
+            }
+        }
+
+        // If stdout is closed (EOF, HUP, or helper closed it) but child process group is still alive,
+        // continue polling child state until it exits or the absolute monotonic deadline expires.
+        if stdout_closed {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5).min(remaining));
+            continue;
+        }
+
+        let now = Instant::now();
+        let remaining_ms = (deadline.saturating_duration_since(now).as_millis().min(50) as i32).max(1);
+        let mut pfd = PollFd {
+            fd: raw_fd,
+            events: POLLIN | POLLHUP | POLLERR,
+            revents: 0,
+        };
+
+        let ret = unsafe { poll(&mut pfd, 1, remaining_ms) };
+        if ret < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            failed = true;
+            break;
+        } else if ret == 0 {
+            // Poll slice reached; loop around to evaluate deadline and child.try_wait()
             continue;
         }
 
         if pfd.revents & POLLIN != 0 {
             match stdout.read(&mut chunk) {
-                Ok(0) => break, // EOF
+                Ok(0) => {
+                    stdout_closed = true;
+                }
                 Ok(n) => {
                     if buffer.len() + n > max_output_bytes {
                         let take = max_output_bytes.saturating_sub(buffer.len());
@@ -164,9 +199,13 @@ fn run_git_bounded(
                     buffer.extend_from_slice(&chunk[..n]);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
+                Err(_) => {
+                    failed = true;
+                    break;
+                }
             }
         } else if pfd.revents & (POLLHUP | POLLERR) != 0 {
+            // Read any final bytes available before marking stdout closed
             while let Ok(n) = stdout.read(&mut chunk) {
                 if n == 0 {
                     break;
@@ -179,14 +218,22 @@ fn run_git_bounded(
                 }
                 buffer.extend_from_slice(&chunk[..n]);
             }
-            break;
+            stdout_closed = true;
         }
     }
 
-    if timed_out || overrun {
-        reap_process_group(child, pid);
-    } else {
-        let _ = child.wait();
+    let is_running = match child.try_wait() {
+        Ok(Some(_)) => false,
+        _ => true,
+    };
+
+    let timed_out = Instant::now() >= deadline;
+    if is_running || timed_out || overrun || failed {
+        reap_process_group(&mut child, pid);
+    }
+
+    if timed_out || overrun || failed {
+        return None;
     }
 
     Some(String::from_utf8_lossy(&buffer).to_string())
@@ -428,5 +475,60 @@ fn main() {
     for r in &res.repos {
         let status = if r.dirty { format!("{} files", r.modified_count) } else { "Clean".to_string() };
         println!("{:<25} {:<12} {:<10} {:<30}", r.name, r.branch, status, r.last_commit);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_git_child_closes_stdout_and_sleeps_enforces_deadline() {
+        let temp_dir = env::temp_dir().join(format!("gitradar_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // Initialize a dummy git repository
+        let init_status = Command::new("git")
+            .args(["-C", &temp_dir.to_string_lossy(), "init"])
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(init_status.status.success());
+
+        // Configure a git alias that closes stdout and sleeps for 5 seconds
+        let config_status = Command::new("git")
+            .args([
+                "-C",
+                &temp_dir.to_string_lossy(),
+                "config",
+                "alias.sleepy",
+                "!sh -c 'exec 1>&-; exec 2>&-; sleep 5'",
+            ])
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(config_status.status.success());
+
+        let start = Instant::now();
+        let deadline = start + Duration::from_millis(150);
+
+        // Run git bounded with 150ms deadline
+        let result = run_git_bounded(&temp_dir, &["sleepy"], deadline, 1024);
+        let elapsed = start.elapsed();
+
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        assert!(result.is_none(), "Expected command to fail on timeout");
+        assert!(
+            elapsed < Duration::from_millis(600),
+            "Elapsed time {:?} exceeded deadline bound (must not block for 5s)",
+            elapsed
+        );
+        assert!(
+            elapsed >= Duration::from_millis(140),
+            "Elapsed time {:?} returned too early",
+            elapsed
+        );
     }
 }
