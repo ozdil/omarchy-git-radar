@@ -399,7 +399,7 @@ fn inspect_repo(repo_path: &Path, deadline: Instant) -> RepoInfo {
     let mut ahead = 0;
     let mut behind = 0;
     if let Some(out_str) = run_git_bounded(repo_path, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], deadline, CAP_REV_LIST_BYTES) {
-        let parts: Vec<&str> = out_str.trim().split_whitespace().collect();
+        let parts: Vec<&str> = out_str.split_whitespace().collect();
         if parts.len() == 2 {
             behind = parts[0].parse::<usize>().unwrap_or(0);
             ahead = parts[1].parse::<usize>().unwrap_or(0);

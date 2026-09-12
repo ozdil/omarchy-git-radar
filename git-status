@@ -4,11 +4,11 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="${DIR}/gitradar-engine"
 
 if [[ ! -x "${BIN}" ]] && [[ -f "${DIR}/Cargo.toml" ]]; then
-    (cd "${DIR}" && cargo build --release --quiet && cp "target/release/gitradar-engine" "${BIN}" && chmod +x "${BIN}") >/dev/null 2>&1 || true
+    (cd "${DIR}" && cargo build --release --locked --quiet && cp "target/release/gitradar-engine" "${BIN}" && chmod +x "${BIN}") >/dev/null 2>&1 || true
 fi
 
 if [[ -x "${BIN}" ]]; then
     exec "${BIN}" --status
 else
-    echo '{"text":"GIT: OFFLINE","tooltip":"Engine binary not found (run cargo build --release)","class":"alert"}'
+    echo '{"text":"GIT: OFFLINE","tooltip":"Engine binary not found (run cargo build --release --locked)","class":"alert"}'
 fi
