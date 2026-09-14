@@ -268,6 +268,16 @@ Panel {
           spacing: Style.space(6)
 
           Button {
+            text: "☕"
+            tooltipText: "Buy Me a Coffee"
+            foreground: "#FFDD00"
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            bordered: true
+            onClicked: Qt.openUrlExternally("https://buymeacoffee.com/ozdil")
+          }
+
+          Button {
             text: "Refresh"
             iconText: ""
             foreground: root.foreground

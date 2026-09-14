@@ -1,5 +1,7 @@
 # Git Radar - Developer Commit and Multi-Repository Watchdog for Omarchy Linux
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-Support_Development-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/ozdil)
+
 Real-time multi-repository watchdog, dirty state detector, and developer pulse for Omarchy Linux.
 
 Author: Ozan Ozdil (ozdil)  
@@ -85,6 +87,14 @@ Git Radar complies strictly with the Omarchy Linux Security Standards (AGENTS.md
 - Subprocess Isolation: Processes execute with strict monotonic deadlines and bounded buffer limits (64 KiB), preventing hangs on large repository trees.
 - Zero Mutable Runtime Execution: The engine never downloads or executes external scripts at runtime.
 - Plain Text UI: All dynamic output rendered in QML components utilizes `textFormat: Text.PlainText` to prevent markup and script injection.
+
+---
+
+## Support & Sponsorship
+
+If you find Git Radar useful and want to support independent Linux development:
+
+<a href="https://buymeacoffee.com/ozdil" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 50px !important;width: 180px !important;" ></a>
 
 ---
 
