@@ -26,7 +26,7 @@ Panel {
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color accent: Color.accent
   readonly property color urgent: Color.urgent
-  readonly property string fontFamily: (bar && bar.fontFamily) ? bar.fontFamily : ((typeof Style !== "undefined" && Style.font && Style.font.family) ? Style.font.family : "JetBrainsMono Nerd Font")
+  readonly property string fontFamily: (bar && bar.fontFamily) ? bar.fontFamily : ((typeof Style !== "undefined" && Style.font && Style.font.family) ? Style.font.family : "JetBrainsMono Nerd Font, JetBrains Mono, monospace")
 
   readonly property var filteredRepos: {
     if (!root.repos || root.repos.length === 0) return []
