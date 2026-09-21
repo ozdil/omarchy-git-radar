@@ -1,23 +1,74 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
 set -euo pipefail
 
+# Immediate rejection of loader injection
+if [ -n "${LD_PRELOAD:-}" ] || [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    echo "Security Error: Prohibited loader control variable detected" >&2
+    exit 1
+fi
+
+# Re-exec through fixed trusted shell under sanitized environment (/usr/bin/env -i)
+if [ "${GITRADAR_SECURE_ENV:-0}" != "1" ]; then
+    exec /usr/bin/env -i \
+        PATH="/usr/bin:/bin:${HOME}/.local/bin:${HOME}/.cargo/bin" \
+        HOME="${HOME}" \
+        USER="${USER:-$(/usr/bin/id -un 2>/dev/null || echo "user")}" \
+        LANG="${LANG:-C.UTF-8}" \
+        LC_ALL="${LC_ALL:-C.UTF-8}" \
+        DISPLAY="${DISPLAY:-}" \
+        WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+        XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(/usr/bin/id -u 2>/dev/null || echo 1000)}" \
+        XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}" \
+        XDG_CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}" \
+        GITRADAR_SECURE_ENV=1 \
+        /bin/bash -p "$0" "$@"
+fi
+
+# Reject unexpected build and loader controls before building or launching
+for var in LD_PRELOAD LD_LIBRARY_PATH RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER RUSTFLAGS CARGO_HOME BASH_ENV ENV; do
+    if [ -n "${!var+x}" ]; then
+        echo "Security Error: Prohibited build/loader control variable detected: ${var}" >&2
+        exit 1
+    fi
+done
+
+# Resolve trusted quickshell binary
+QUICKSHELL_BIN=""
+if [[ -x /usr/bin/quickshell ]]; then
+    QUICKSHELL_BIN="/usr/bin/quickshell"
+elif [[ -x /usr/local/bin/quickshell ]]; then
+    QUICKSHELL_BIN="/usr/local/bin/quickshell"
+elif [[ -x "${HOME}/.local/bin/quickshell" ]]; then
+    QUICKSHELL_BIN="${HOME}/.local/bin/quickshell"
+fi
+
 # Prefer native Quickshell UI if available
-if [[ "${1:-}" != "--cli" ]] && command -v quickshell >/dev/null 2>&1; then
-    if quickshell ipc -p /usr/share/omarchy/shell call ozdil.git-radar toggle >/dev/null 2>&1; then
+if [[ "${1:-}" != "--cli" && -n "${QUICKSHELL_BIN}" ]]; then
+    if "${QUICKSHELL_BIN}" ipc -p /usr/share/omarchy/shell call ozdil.git-radar toggle >/dev/null 2>&1; then
         exit 0
     fi
 fi
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(/usr/bin/dirname "$(/usr/bin/realpath "${BASH_SOURCE[0]}")")" && /usr/bin/pwd)"
 BIN="${DIR}/gitradar-engine"
 
+# Resolve trusted cargo binary
+CARGO_BIN=""
+if [[ -x /usr/bin/cargo ]]; then
+    CARGO_BIN="/usr/bin/cargo"
+elif [[ -x "${HOME}/.cargo/bin/cargo" ]]; then
+    CARGO_BIN="${HOME}/.cargo/bin/cargo"
+fi
+
 if [[ ! -x "${BIN}" ]] && [[ -f "${DIR}/Cargo.toml" ]]; then
-    echo "Building gitradar-engine from source..."
-    (cd "${DIR}" && cargo build --release --locked && cp "target/release/gitradar-engine" "${BIN}" && chmod +x "${BIN}") || true
+    if [[ -n "${CARGO_BIN}" ]]; then
+        echo "Building gitradar-engine from source..."
+        (cd "${DIR}" && "${CARGO_BIN}" build --release --locked && /usr/bin/cp "target/release/gitradar-engine" "${BIN}" && /usr/bin/chmod 755 "${BIN}") || true
+    fi
 fi
 
 if [[ -x "${BIN}" ]]; then
-    clear
+    /usr/bin/clear 2>/dev/null || true
     "${BIN}"
     echo ""
     read -r -p "Press Enter to exit..." || true
