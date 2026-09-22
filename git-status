@@ -23,7 +23,7 @@ if [ "${GITRADAR_SECURE_ENV:-0}" != "1" ]; then
 fi
 
 # Reject unexpected build and loader controls before building or launching
-for var in LD_PRELOAD LD_LIBRARY_PATH RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER RUSTFLAGS CARGO_HOME BASH_ENV ENV; do
+for var in LD_PRELOAD LD_LIBRARY_PATH RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_HOME BASH_ENV ENV; do
     if [ -n "${!var+x}" ]; then
         echo "Security Error: Prohibited build/loader control variable detected: ${var}" >&2
         exit 1
@@ -43,12 +43,21 @@ fi
 
 if [[ ! -x "${BIN}" ]] && [[ -f "${DIR}/Cargo.toml" ]]; then
     if [[ -n "${CARGO_BIN}" ]]; then
-        (cd "${DIR}" && "${CARGO_BIN}" build --release --locked --quiet && /usr/bin/cp "target/release/gitradar-engine" "${BIN}" && /usr/bin/chmod 755 "${BIN}") >/dev/null 2>&1 || true
+        TMP_BUILD_DIR="$(/usr/bin/mktemp -d -t gitradar-build.XXXXXX)"
+        cleanup() {
+            /usr/bin/rm -rf "${TMP_BUILD_DIR}"
+        }
+        trap cleanup EXIT
+        if (cd "${DIR}" && "${CARGO_BIN}" build --release --locked --quiet --target-dir "${TMP_BUILD_DIR}") >/dev/null 2>&1; then
+            /usr/bin/install -m 755 "${TMP_BUILD_DIR}/release/gitradar-engine" "${BIN}" >/dev/null 2>&1 || true
+        fi
     fi
 fi
 
 if [[ -x "${BIN}" ]]; then
     exec "${BIN}" --status
+elif [[ -x "${HOME}/.local/bin/gitradar-engine" ]]; then
+    exec "${HOME}/.local/bin/gitradar-engine" --status
 else
     echo '{"text":"GIT: OFFLINE","tooltip":"Engine binary not found (run cargo build --release --locked)","class":"alert"}'
 fi
