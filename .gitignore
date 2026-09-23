@@ -1,2 +1,4 @@
 target/
 gitradar-engine
+.engine-provenance
+.engine-build.lock
