@@ -131,6 +131,11 @@ Panel {
   }
 
   Process {
+    id: openWindowProc
+    command: ["git-dashboard"]
+  }
+
+  Process {
     id: scanProc
     command: [root.resolveEnginePath(), "--json"]
     onExited: scanWatchdogTimer.stop()
@@ -268,9 +273,25 @@ Panel {
           spacing: Style.space(6)
 
           Button {
-            text: "☕"
-            tooltipText: "Buy Me a Coffee"
-            foreground: "#FFDD00"
+            text: "Window"
+            iconText: "\uf2d0"
+            tooltipText: "Open Standalone Radar Window"
+            foreground: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            bordered: true
+            onClicked: {
+              root.close()
+              openWindowProc.running = true
+            }
+          }
+
+          Button {
+            text: "Donate"
+            iconText: "\uf0f4"
+            tooltipText: "Support Omarchy Project"
+            foreground: root.foreground
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
             bordered: true

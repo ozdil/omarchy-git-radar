@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Git Radar
+GenericName=Git Repository Tracker
+Comment=Git repository tracker and commit activity radar for Omarchy Linux
+Exec=git-dashboard
+Icon=git
+Terminal=false
+Categories=Development;RevisionControl;Monitor;
+Keywords=git;repository;tracker;radar;omarchy;
