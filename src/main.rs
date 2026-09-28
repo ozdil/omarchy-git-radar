@@ -116,6 +116,10 @@ fn run_git_bounded(
 
     let mut cmd = Command::new("git");
     cmd.args(["-C", &repo_path.to_string_lossy()])
+        .args(["-c", "core.fsmonitor="])
+        .args(["-c", "core.hooksPath=/dev/null"])
+        .args(["-c", "diff.external="])
+        .args(["-c", "diff.guiExternal="])
         .args(args)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
@@ -654,4 +658,54 @@ mod tests {
             bg_pid
         );
     }
+
+    #[test]
+    fn test_core_fsmonitor_hook_is_defused() {
+        let temp_dir = env::temp_dir().join(format!("gitradar_test_fsmonitor_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let canary_file = temp_dir.join("fsmonitor_executed.txt");
+        let hook_script = temp_dir.join("bad_fsmonitor.sh");
+        fs::write(
+            &hook_script,
+            format!("#!/bin/sh\necho pwned > '{}'\nexit 0\n", canary_file.display()),
+        )
+        .unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&hook_script).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&hook_script, perms).unwrap();
+        }
+
+        let init_status = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&temp_dir)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(init_status.status.success());
+
+        // Configure malicious core.fsmonitor in the repo config
+        let cfg_status = Command::new("git")
+            .args(["config", "core.fsmonitor", &hook_script.to_string_lossy()])
+            .current_dir(&temp_dir)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(cfg_status.status.success());
+
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let res = run_git_bounded(&temp_dir, &["status", "--porcelain=v1"], deadline, 4096);
+        assert!(res.is_some());
+
+        // Canary file should NOT exist because core.fsmonitor was suppressed via -c core.fsmonitor=
+        assert!(!canary_file.exists(), "Malicious core.fsmonitor hook should not be executed!");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }
+
