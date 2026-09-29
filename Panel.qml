@@ -25,6 +25,20 @@ Panel {
   property bool showAboutModal: false
   property int selectedIndex: 0
   property bool cursorActive: false
+  property string toastMessage: ""
+
+  function showToast(msg) {
+    root.toastMessage = msg
+    toastTimer.restart()
+  }
+
+  function copyPath(path) {
+    if (!path) return
+    root.actionTarget = path
+    copyWatchdogTimer.restart()
+    copyProc.running = true
+    root.showToast("Path copied to clipboard")
+  }
 
   onOpenedChanged: {
     if (root.opened) {
@@ -151,6 +165,31 @@ Panel {
     }
   }
 
+  Timer {
+    id: toastTimer
+    interval: 2200
+    repeat: false
+    onTriggered: root.toastMessage = ""
+  }
+
+  Timer {
+    id: copyWatchdogTimer
+    interval: 3000
+    repeat: false
+    onTriggered: {
+      if (copyProc.running) {
+        copyProc.running = false
+        copyProc.kill()
+      }
+    }
+  }
+
+  Process {
+    id: copyProc
+    command: [root.resolveEnginePath(), "--copy-path", root.actionTarget]
+    onExited: copyWatchdogTimer.stop()
+  }
+
   Process {
     id: termProc
     command: [root.resolveEnginePath(), "--open-terminal", root.actionTarget]
@@ -201,6 +240,8 @@ Panel {
     scanWatchdogTimer.stop()
     termWatchdogTimer.stop()
     filesWatchdogTimer.stop()
+    copyWatchdogTimer.stop()
+    toastTimer.stop()
     if (scanProc.running) {
       scanProc.running = false
       scanProc.kill()
@@ -212,6 +253,10 @@ Panel {
     if (filesProc.running) {
       filesProc.running = false
       filesProc.kill()
+    }
+    if (copyProc.running) {
+      copyProc.running = false
+      copyProc.kill()
     }
   }
 
@@ -282,6 +327,10 @@ Panel {
         } else if (t === "o" || t === "O") {
           if (root.filteredRepos && root.filteredRepos[root.selectedIndex]) {
             root.openFiles(root.filteredRepos[root.selectedIndex].path)
+          }
+        } else if (t === "c" || t === "C") {
+          if (root.filteredRepos && root.filteredRepos[root.selectedIndex]) {
+            root.copyPath(root.filteredRepos[root.selectedIndex].path)
           }
         }
       }
@@ -810,6 +859,16 @@ Panel {
                         onClicked: root.openFiles(repoDelegate.repoPath)
                       }
 
+                      Button {
+                        text: "Copy Path"
+                        iconText: ""
+                        bordered: true
+                        fontSize: Style.font.caption
+                        horizontalPadding: Style.space(10)
+                        verticalPadding: Style.space(4)
+                        onClicked: root.copyPath(repoDelegate.repoPath)
+                      }
+
                       Item { Layout.fillWidth: true }
                     }
                   }
@@ -866,7 +925,7 @@ Panel {
         }
 
         Text {
-          text: "Version: 1.1.0\nDeveloper: Ozan Ozdil (@ozdil)\nLicense: MIT\nMulti-Repository Git Activity & Developer Pulse Tracker"
+          text: "Version: 1.3.0\nDeveloper: Ozan Ozdil (@ozdil)\nLicense: MIT\nMulti-Repository Git Activity & Developer Pulse Tracker"
           color: root.foreground
           opacity: 0.7
           font.family: root.fontFamily
@@ -901,6 +960,44 @@ Panel {
           fontFamily: root.fontFamily
           fontSize: Style.font.caption
           onClicked: Qt.openUrlExternally("https://buymeacoffee.com/ozdil")
+        }
+      }
+    }
+
+    // Toast Notification Banner Overlay
+    Rectangle {
+      id: toastNotification
+      visible: root.toastMessage.length > 0
+      z: 110
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: Style.space(16)
+      anchors.horizontalCenter: parent.horizontalCenter
+      implicitWidth: toastLabel.implicitWidth + Style.space(24)
+      implicitHeight: Style.space(32)
+      radius: Style.cornerRadius > 0 ? Style.space(6) : 0
+      color: Qt.rgba(0.08, 0.08, 0.12, 0.95)
+      border.color: root.accent
+      border.width: 1
+
+      RowLayout {
+        anchors.centerIn: parent
+        spacing: Style.space(8)
+
+        Text {
+          text: ""
+          color: "#22c55e"
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        Text {
+          id: toastLabel
+          textFormat: Text.PlainText
+          text: root.toastMessage
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
         }
       }
     }

@@ -47,6 +47,13 @@ Item {
         }
     }
 
+    property string toastMessage: ""
+
+    function showToast(msg) {
+        root.toastMessage = msg;
+        toastTimer.restart();
+    }
+
     function openTerminal(path) {
         root.actionTarget = path;
         termProc.running = true;
@@ -55,6 +62,20 @@ Item {
     function openFileManager(path) {
         root.actionTarget = path;
         filesProc.running = true;
+    }
+
+    function copyPath(path) {
+        if (!path) return;
+        root.actionTarget = path;
+        copyProc.running = true;
+        root.showToast("Path copied to clipboard");
+    }
+
+    Timer {
+        id: toastTimer
+        interval: 2200
+        repeat: false
+        onTriggered: root.toastMessage = ""
     }
 
     Timer {
@@ -88,6 +109,11 @@ Item {
                 }
             }
         }
+    }
+
+    Process {
+        id: copyProc
+        command: [root.enginePath, "--copy-path", root.actionTarget]
     }
 
     Process {
@@ -476,6 +502,32 @@ Item {
                                     onClicked: root.openFileManager(modelData.path)
                                 }
                             }
+
+                            // Action: Copy Repository Path
+                            Rectangle {
+                                width: 28
+                                height: 28
+                                radius: Theme.radiusSm
+                                color: copyBtnArea.containsMouse ? Theme.bgCardHover : Theme.bgDark
+                                border.color: Theme.border
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: Theme.iconCopy
+                                    font.family: Theme.iconFont
+                                    font.pixelSize: 12
+                                    color: Theme.textMain
+                                }
+
+                                MouseArea {
+                                    id: copyBtnArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.copyPath(modelData.path)
+                                }
+                            }
                         }
 
                         // Expanded Modified Files Details
@@ -525,6 +577,43 @@ Item {
                     font.pixelSize: 13
                     color: Theme.textMuted
                 }
+            }
+        }
+    }
+
+    // Toast Notification Banner Overlay
+    Rectangle {
+        id: toastBanner
+        visible: root.toastMessage.length > 0
+        z: 99
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
+        anchors.horizontalCenter: parent.horizontalCenter
+        implicitWidth: toastText.implicitWidth + 32
+        implicitHeight: 34
+        radius: Theme.radiusSm
+        color: Qt.rgba(0.08, 0.08, 0.12, 0.95)
+        border.color: Theme.accent
+        border.width: 1
+
+        RowLayout {
+            anchors.centerIn: parent
+            spacing: 8
+
+            Text {
+                text: Theme.iconCheck
+                font.family: Theme.iconFont
+                font.pixelSize: 12
+                color: Theme.accentSuccess
+            }
+
+            Text {
+                id: toastText
+                text: root.toastMessage
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+                font.bold: true
+                color: Theme.textMain
             }
         }
     }

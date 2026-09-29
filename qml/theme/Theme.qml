@@ -59,6 +59,7 @@ QtObject {
     readonly property string iconClock: "\uf017"
     readonly property string iconFilter: "\uf0b0"
     readonly property string iconDiff: "\uf440"
+    readonly property string iconCopy: "\uf0c5"
 
     property string lastLoadedRaw: ""
 

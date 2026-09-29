@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -478,9 +478,29 @@ fn main() {
     if args.len() >= 3 && args[1] == "--open-terminal" {
         let raw_path = &args[2];
         if let Ok(canonical) = fs::canonicalize(raw_path) {
-            let _ = Command::new("xdg-terminal-exec")
-                .arg(format!("--dir={}", canonical.display()))
+            let dir_arg = format!("--dir={}", canonical.display());
+            // Attempt xdg-terminal-exec first, falling back to foot, alacritty, or kitty
+            let spawned = Command::new("xdg-terminal-exec")
+                .arg(&dir_arg)
                 .spawn();
+            if spawned.is_err() {
+                let _ = Command::new("foot")
+                    .arg("-D")
+                    .arg(&canonical)
+                    .spawn()
+                    .or_else(|_| {
+                        Command::new("alacritty")
+                            .arg("--working-directory")
+                            .arg(&canonical)
+                            .spawn()
+                    })
+                    .or_else(|_| {
+                        Command::new("kitty")
+                            .arg("--directory")
+                            .arg(&canonical)
+                            .spawn()
+                    });
+            }
         }
         return;
     }
@@ -491,6 +511,37 @@ fn main() {
             let _ = Command::new("xdg-open")
                 .arg(canonical)
                 .spawn();
+        }
+        return;
+    }
+
+    if args.len() >= 3 && args[1] == "--copy-path" {
+        let raw_path = &args[2];
+        if let Ok(canonical) = fs::canonicalize(raw_path) {
+            let path_str = canonical.display().to_string();
+            // Securely write to wl-copy on Wayland, fallback to xclip
+            if let Ok(mut child) = Command::new("wl-copy")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(path_str.as_bytes());
+                }
+                let _ = child.wait();
+            } else if let Ok(mut child) = Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(path_str.as_bytes());
+                }
+                let _ = child.wait();
+            }
         }
         return;
     }

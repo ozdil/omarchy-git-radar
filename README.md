@@ -18,9 +18,11 @@ Plugin ID: ozdil.git-radar
 - Interactive Inspection Menus: Expand repository entries to view full branch status, commit hash, author, relative commit timestamp, and ahead/behind upstream tracking.
 - File-Level Inspection: Lists modified, untracked, deleted, and staged files with clean status indicators ([MOD], [NEW], [DEL], [STG]).
 - Filter Navigation: Switch between uncommitted repositories requiring attention and all tracked repositories across your workspace.
-- One-Click Launchers: Open your preferred terminal emulator (xdg-terminal-exec) or file manager (xdg-open) directly at the repository root.
+- One-Click Launchers: Open your preferred terminal emulator (xdg-terminal-exec, foot, alacritty, kitty) or file manager (xdg-open) directly at the repository root.
+- Wayland Native Clipboard: Instantly copy repository root paths to the Wayland system clipboard (wl-copy / xclip) with instant toast feedback.
+- Keyboard Navigation: Seamless keyboard controls with cursor movement, toggle expand, refresh (r), toggle filter (f), launch terminal (t), open files (o), copy path (c), and imprint info (a).
 - Dynamic Bar Widget: Top bar icon dynamically highlights when dirty working trees or uncommitted files are present.
-- Theme Integration: Fully integrated with the active Omarchy color scheme and typography.
+- Theme Integration: Fully integrated with the active Omarchy color scheme and typography (JetBrainsMono Nerd Font standard).
 - Native Rust Engine: High-performance scanner executing within bounded memory limits and monotonic deadlines.
 
 ---

@@ -1,6 +1,6 @@
 # Maintainer: Ozan Özdil <ozan@pm.me>
 pkgname=omarchy-git-radar
-pkgver=1.1.0
+pkgver=1.3.0
 pkgrel=1
 pkgdesc="Developer pulse, live commit activity and multi-repo tracker for Omarchy Linux"
 arch=('x86_64')
