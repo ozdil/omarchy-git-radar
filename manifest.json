@@ -3,8 +3,8 @@
   "id": "ozdil.git-radar",
   "name": "Git Radar",
   "description": "Developer pulse, live commit activity and multi-repo tracker for Omarchy Linux",
-  "version": "1.1.0",
-  "author": "Ozan Özdil",
+  "version": "1.2.0",
+  "author": "Ozan \u00d6zdil",
   "license": "MIT",
   "kinds": [
     "bar-widget"
