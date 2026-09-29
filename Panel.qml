@@ -22,6 +22,39 @@ Panel {
   property string expandedPath: ""
   property string filterMode: "dirty" // "dirty" or "all"
   property string actionTarget: ""
+  property bool showAboutModal: false
+  property int selectedIndex: 0
+  property bool cursorActive: false
+
+  onOpenedChanged: {
+    if (root.opened) {
+      selectedIndex = 0
+      cursorActive = false
+      root.refresh()
+    }
+  }
+
+  function moveCursor(dy) {
+    if (!cursorActive) {
+      cursorActive = true
+      selectedIndex = 0
+      return
+    }
+    var len = root.filteredRepos ? root.filteredRepos.length : 0
+    if (len === 0) return
+    var next = selectedIndex + dy
+    if (next < 0) next = 0
+    if (next >= len) next = len - 1
+    selectedIndex = next
+  }
+
+  function activateSelected() {
+    if (!root.filteredRepos || root.filteredRepos.length === 0) return
+    var item = root.filteredRepos[selectedIndex]
+    if (item && item.path) {
+      root.toggleExpand(item.path)
+    }
+  }
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color accent: Color.accent
@@ -131,11 +164,6 @@ Panel {
   }
 
   Process {
-    id: openWindowProc
-    command: ["git-dashboard"]
-  }
-
-  Process {
     id: scanProc
     command: [root.resolveEnginePath(), "--json"]
     onExited: scanWatchdogTimer.stop()
@@ -223,15 +251,47 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
+    focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(520))
     contentHeight: panel.fittedContentHeight(contentCol.implicitHeight)
 
-    Column {
-      id: contentCol
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.top: parent.top
-      spacing: Style.space(12)
+    PanelKeyCatcher {
+      id: keyCatcher
+      anchors.fill: parent
+      onCloseRequested: {
+        if (root.showAboutModal) {
+          root.showAboutModal = false
+        } else {
+          root.close()
+        }
+      }
+      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onMoveRequested: function(dx, dy) { root.moveCursor(dy) }
+      onActivateRequested: root.activateSelected()
+      onTextKey: function(t) {
+        if (t === "r" || t === "R") {
+          root.refresh()
+        } else if (t === "a" || t === "A") {
+          root.showAboutModal = !root.showAboutModal
+        } else if (t === "f" || t === "F") {
+          root.setFilter(root.filterMode === "dirty" ? "all" : "dirty")
+        } else if (t === "t" || t === "T") {
+          if (root.filteredRepos && root.filteredRepos[root.selectedIndex]) {
+            root.openTerminal(root.filteredRepos[root.selectedIndex].path)
+          }
+        } else if (t === "o" || t === "O") {
+          if (root.filteredRepos && root.filteredRepos[root.selectedIndex]) {
+            root.openFiles(root.filteredRepos[root.selectedIndex].path)
+          }
+        }
+      }
+
+      Column {
+        id: contentCol
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        spacing: Style.space(12)
 
       // ---------- Header ----------
       Item {
@@ -273,29 +333,14 @@ Panel {
           spacing: Style.space(6)
 
           Button {
-            text: "Window"
-            iconText: "\uf2d0"
-            tooltipText: "Open Standalone Radar Window"
+            iconText: "󰋽"
+            tooltipText: "About & Imprint"
             foreground: root.foreground
             accent: root.accent
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
             bordered: true
-            onClicked: {
-              root.close()
-              openWindowProc.running = true
-            }
-          }
-
-          Button {
-            text: "Donate"
-            iconText: "\uf0f4"
-            tooltipText: "Support Omarchy Project"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            bordered: true
-            onClicked: Qt.openUrlExternally("https://buymeacoffee.com/ozdil")
+            onClicked: root.showAboutModal = !root.showAboutModal
           }
 
           Button {
@@ -516,16 +561,21 @@ Panel {
                 readonly property string commitTime: repoData ? String(repoData.last_commit_time || "") : ""
                 readonly property var modFiles: repoData && repoData.modified_files ? repoData.modified_files : []
                 readonly property bool isExpanded: root.expandedPath === repoPath
+                readonly property bool isKeyboardFocused: root.cursorActive && index === root.selectedIndex
 
                 color: isDirty
                        ? Qt.rgba(0.94, 0.27, 0.27, 0.08)
                        : (isExpanded
                           ? Qt.darker(Color.popups.background, 0.85)
-                          : Style.selectedFillFor(root.foreground, root.accent))
-                border.color: isExpanded
-                              ? (isDirty ? Color.urgent : root.accent)
-                              : (isDirty ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.4) : "transparent")
-                border.width: (isExpanded || isDirty) ? 1 : 0
+                          : (isKeyboardFocused
+                             ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
+                             : Style.selectedFillFor(root.foreground, root.accent)))
+                border.color: isKeyboardFocused
+                              ? root.accent
+                              : (isExpanded
+                                 ? (isDirty ? Color.urgent : root.accent)
+                                 : (isDirty ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.4) : "transparent"))
+                border.width: (isExpanded || isDirty || isKeyboardFocused) ? 1 : 0
 
                 Column {
                   id: cardContent
@@ -769,6 +819,91 @@ Panel {
           }
         }
       }
+    }
+
+    // About & Imprint Modal Overlay
+    Rectangle {
+      id: aboutOverlay
+      anchors.fill: parent
+      visible: root.showAboutModal
+      color: Qt.rgba(0.05, 0.05, 0.07, 0.96)
+      z: 99
+
+      MouseArea {
+        anchors.fill: parent
+        // Block underlying clicks
+      }
+
+      Column {
+        anchors.centerIn: parent
+        width: parent.width - Style.space(40)
+        spacing: Style.space(12)
+
+        Row {
+          width: parent.width
+          Item {
+            width: parent.width - closeAboutBtn.implicitWidth
+            implicitHeight: aboutTitleText.implicitHeight
+            Text {
+              id: aboutTitleText
+              text: "Git Radar"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+              font.bold: true
+            }
+          }
+
+          Button {
+            id: closeAboutBtn
+            text: "✕"
+            bordered: true
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            onClicked: root.showAboutModal = false
+          }
+        }
+
+        Text {
+          text: "Version: 1.1.0\nDeveloper: Ozan Ozdil (@ozdil)\nLicense: MIT\nMulti-Repository Git Activity & Developer Pulse Tracker"
+          color: root.foreground
+          opacity: 0.7
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          lineHeight: 1.3
+        }
+
+        PanelSeparator {
+          width: parent.width
+          foreground: root.foreground
+        }
+
+        Button {
+          width: parent.width
+          text: "GitHub / Contact"
+          iconText: "󰊤"
+          bordered: true
+          foreground: root.foreground
+          accent: root.accent
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          onClicked: Qt.openUrlExternally("https://github.com/ozdil")
+        }
+
+        Button {
+          width: parent.width
+          text: "Buy Me a Coffee"
+          iconText: "󰅖"
+          bordered: true
+          foreground: "#000000"
+          color: "#FFDD00"
+          fontFamily: root.fontFamily
+          fontSize: Style.font.caption
+          onClicked: Qt.openUrlExternally("https://buymeacoffee.com/ozdil")
+        }
+      }
+    }
     }
   }
 }
